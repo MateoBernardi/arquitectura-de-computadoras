@@ -1,0 +1,21 @@
+# Temporales y caches de Vivado
+*.cache/
+*.hw/
+*.ip_user_files/
+*.sim/
+*.runs/
+*.jou
+*.log
+*.str
+*.dmp
+*.wdb
+*.vcd
+.Xil/
+hd_visual/
+xsim.dir/
+
+# Archivos de salida de compilación
+*.bit
+*.bin
+*.dcp
+*.rpt
