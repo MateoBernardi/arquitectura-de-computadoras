@@ -1,12 +1,19 @@
+`timescale 1ns / 1ps
+//////////////////////////////////////////////////////////////////////////////////
+// tb_alu - Test unitario de alu_tp1 (puramente combinacional).
+// Compara contra el modelo de referencia (model.vh) en cada vector, incluyendo
+// una tanda de vectores aleatorios por operacion.
+//////////////////////////////////////////////////////////////////////////////////
+
 module tb_alu;
 
     parameter NB_DATA = 8;
     parameter NB_OP   = 6;
-    
+
     `include "alu_ops.vh"
     `include "model.vh"
 
-    parameter NUM_RANDOM_PER_OP = 50; 
+    parameter NUM_RANDOM_PER_OP = 50;
     parameter VERBOSE           = 0;
 
     reg  signed [NB_DATA-1:0] tb_i_data_a;
@@ -16,11 +23,11 @@ module tb_alu;
     wire                      tb_o_z;
     wire                      tb_o_o;
 
-    alu_tp1 
+    alu_tp1
     #(
         .NB_DATA (NB_DATA),
         .NB_OP   (NB_OP)
-    ) 
+    )
     uut(
         .i_data_a  (tb_i_data_a),
         .i_data_b  (tb_i_data_b),
@@ -72,6 +79,15 @@ module tb_alu;
     integer i, j;
 
     initial begin
+        // *** FIX respecto a la version anterior: faltaba esta inicializacion,
+        // op_list quedaba en X y el loop random no probaba nada util. ***
+        op_list[0] = OP_ADD; op_list[1] = OP_SUB; op_list[2] = OP_AND; op_list[3] = OP_OR;
+        op_list[4] = OP_XOR; op_list[5] = OP_SRA; op_list[6] = OP_SRL; op_list[7] = OP_NOR;
+
+        $display("==========================================================");
+        $display(" TB_ALU - probando alu_tp1 (NB_DATA=%0d, NB_OP=%0d)", NB_DATA, NB_OP);
+        $display("==========================================================");
+
         run_test(10, 20, OP_ADD);                            // ADD normal
         run_test(MAX_POS, 1, OP_ADD);                        // ADD overflow positivo
         run_test(MIN_NEG, -1, OP_ADD);                       // ADD overflow negativo

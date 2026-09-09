@@ -31,6 +31,9 @@ set_property PACKAGE_PIN U18 [get_ports {button[1]}]
 # button[2] -> btnD (Cargar Operacion)
 set_property PACKAGE_PIN U17 [get_ports {button[2]}]						
 	set_property IOSTANDARD LVCMOS33 [get_ports {button[2]}]
+## Reset (btnR - Boton Derecho)
+set_property PACKAGE_PIN T17 [get_ports i_reset]						
+    set_property IOSTANDARD LVCMOS33 [get_ports i_reset]
 
 ## LEDs (LD0 - LD7 para resultado)
 set_property PACKAGE_PIN U16 [get_ports {led[0]}]					

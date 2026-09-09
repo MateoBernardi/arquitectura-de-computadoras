@@ -15,6 +15,9 @@
 // 
 // Revision:
 // Revision 0.01 - File Created
+// Revision 0.02 - Added reset input; input/output registers moved to the
+//                 new "registers" module; the LEDs and flags now only
+//                 update one cycle after BTN_DATA_OP is pressed.
 // Additional Comments:
 // 
 //////////////////////////////////////////////////////////////////////////////////
@@ -30,22 +33,44 @@ module top
     input wire [NB_BITS-1:0] switch,
     input wire [NB_BUTTON-1:0] button,
     input wire i_clk,
-    output reg signed [NB_DATA-1: 0] led,
-    output reg f_o,
-    output reg f_z
+    input wire i_reset,
+    output signed [NB_DATA-1: 0] led,
+    output f_o,
+    output f_z
 );
 
-localparam BTN_DATA_A = 3'b001;
-localparam BTN_DATA_B = 3'b010;
-localparam BTN_DATA_OP = 3'b100;
+// Operandos/opcode registrados (salida del banco de registros, entrada de la ALU)
+wire [NB_DATA-1:0] alu_data_a;
+wire [NB_DATA-1:0] alu_data_b;
+wire [NB_OP-1:0]   alu_data_op;
 
-reg [NB_DATA-1:0] alu_data_a;
-reg [NB_DATA-1:0] alu_data_b;
-reg [NB_OP-1:0] alu_data_op;
+// Salida combinacional de la ALU (entrada del banco de registros)
+wire signed [NB_DATA-1:0] alu_result;
+wire alu_z;
+wire alu_o;
 
-wire signed [NB_DATA-1:0] alu_out_data;
-wire                      alu_out_z;
-wire                      alu_out_o;
+registers
+#(
+    .NB_DATA(NB_DATA),
+    .NB_OP(NB_OP),
+    .NB_BUTTON(NB_BUTTON)
+)
+u_registers
+(
+    .i_clk(i_clk),
+    .i_reset(i_reset),
+    .i_button(button),
+    .i_switch(switch),
+    .i_alu_result(alu_result),
+    .i_alu_z(alu_z),
+    .i_alu_o(alu_o),
+    .o_data_a(alu_data_a),
+    .o_data_b(alu_data_b),
+    .o_data_op(alu_data_op),
+    .o_led(led),
+    .o_f_z(f_z),
+    .o_f_o(f_o)
+);
 
 alu_tp1 
 #(
@@ -57,28 +82,9 @@ u_alu
     .i_data_a(alu_data_a),
     .i_data_b(alu_data_b),
     .i_data_op(alu_data_op),
-    .o_data(alu_out_data),
-    .o_z(alu_out_z),
-    .o_o(alu_out_o)
+    .o_data(alu_result),
+    .o_z(alu_z),
+    .o_o(alu_o)
 );
-
-reg op_loaded;
-
-always@(posedge i_clk) begin:inputs
-    case(button)
-    BTN_DATA_A: alu_data_a <= switch;
-    BTN_DATA_B: alu_data_b <= switch;
-    BTN_DATA_OP: alu_data_op <= switch [NB_OP-1:0];
-    endcase
-    op_loaded <= (button == BTN_DATA_OP);   // <-- esto falta
-end
-
-always@(posedge i_clk) begin: outputs
-    if (op_loaded) begin
-        led <= alu_out_data;
-        f_z <= alu_out_z;
-        f_o <= alu_out_o;
-    end
-end
 
 endmodule
