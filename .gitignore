@@ -19,3 +19,9 @@ xsim.dir/
 *.bin
 *.dcp
 *.rpt
+
+# Archivo de proyecto de Vivado (ligado a version/ruta local)
+*.xpr
+
+# TP1 ya no se versiona, solo project_1
+/TP1/

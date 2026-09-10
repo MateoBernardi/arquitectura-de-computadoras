@@ -10,8 +10,8 @@
 //   la parte secuencial de la parte combinacional (alu_tp1).
 //
 //   - Registra i_data_a / i_data_b / i_data_op cuando se presiona el boton
-//     correspondiente (misma decodificacion one-hot que antes).
-//   - Genera "op_loaded": un pulso registrado que se activa UN ciclo
+//     correspondiente.
+//   - Genera "op_loaded": un pulso registrado que se activa un ciclo
 //     despues de presionar BTN_DATA_OP. En ese ciclo el resultado
 //     combinacional de la ALU ya esta actualizado con el nuevo opcode,
 //     asi que es el momento correcto para capturarlo.
@@ -35,7 +35,7 @@ module registers
     input wire i_clk,
     input wire i_reset,
 
-    // Interfaz de botones/switches (misma codificacion one-hot de siempre)
+    // botones/switches 
     input wire [NB_BUTTON-1:0] i_button,
     input wire [NB_DATA-1:0]   i_switch,
 
@@ -44,7 +44,7 @@ module registers
     input wire                      i_alu_z,
     input wire                      i_alu_o,
 
-    // Operandos/opcode registrados, van hacia la ALU
+    // opcode registrados, van hacia la ALU
     output reg [NB_DATA-1:0] o_data_a,
     output reg [NB_DATA-1:0] o_data_b,
     output reg [NB_OP-1:0]   o_data_op,
@@ -59,8 +59,7 @@ localparam BTN_DATA_A  = 3'b001;
 localparam BTN_DATA_B  = 3'b010;
 localparam BTN_DATA_OP = 3'b100;
 
-// Pulso registrado: en alto exactamente un ciclo despues de haber
-// presionado BTN_DATA_OP (ver explicacion arriba).
+// presionado BTN_DATA_OP (guarda la operac).
 reg op_loaded;
 
 // --- Carga de operandos / opcode ---
