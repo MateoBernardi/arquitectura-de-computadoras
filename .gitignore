@@ -19,3 +19,9 @@ xsim.dir/
 *.bin
 *.dcp
 *.rpt
+
+# Entornos virtuales de Python
+venv/
+.venv/
+__pycache__/
+*.pyc
