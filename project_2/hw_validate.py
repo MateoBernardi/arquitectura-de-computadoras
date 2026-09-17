@@ -27,7 +27,7 @@ import serial
 
 PORT     = "/dev/serial/by-id/usb-Digilent_Digilent_USB_Device_210292742127-if01-port0" 
 BAUD     = 19200            # must match top's BAUD_RATE parameter
-N_TESTS  = 20
+N_TESTS  = 200
 TIMEOUT  = 2.0              # seconds to wait for the result byte
 
 # Standard MIPS funct codes -- match these to your actual alu_ops.vh
