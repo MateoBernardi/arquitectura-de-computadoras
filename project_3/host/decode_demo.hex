@@ -1,0 +1,18 @@
+// Programa de demostracion de ID: una instruccion de cada formato.
+// Formato $readmemh (una palabra de 32 bits por linea); sirve para
+// debug_host.py (load) y para tb_cpu_decode.v.
+123450b7  // 0x00 lui   x1,0x12345
+00001117  // 0x04 auipc x2,0x1
+ffb00193  // 0x08 addi  x3,x0,-5
+00319213  // 0x0c slli  x4,x3,3
+4011d293  // 0x10 srai  x5,x3,1
+00208333  // 0x14 add   x6,x1,x2
+402083b3  // 0x18 sub   x7,x1,x2
+00602423  // 0x1c sw    x6,8(x0)
+00802403  // 0x20 lw    x8,8(x0)
+00208a63  // 0x24 beq   x1,x2,fin      (no se toma)
+00c004ef  // 0x28 jal   x9,salto       (saltea 0x2c y 0x30)
+00100513  // 0x2c addi  x10,x0,1       (no se ejecuta)
+00200513  // 0x30 addi  x10,x0,2       (no se ejecuta)
+00c48067  // 0x34 salto: jalr x0,12(x9)  -> fin
+00100073  // 0x38 fin:   ebreak

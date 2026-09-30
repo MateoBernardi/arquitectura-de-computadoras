@@ -1,0 +1,9 @@
+// Programa de prueba: una instruccion de 32 bits por linea (formato $readmemh).
+// Sirve para debug_host.py (load) y como IMEM_INIT_FILE en simulacion.
+00500093  // addi x1, x0, 5
+00a00113  // addi x2, x0, 10
+002081b3  // add  x3, x1, x2
+40208233  // sub  x4, x1, x2
+00302023  // sw   x3, 0(x0)
+00002283  // lw   x5, 0(x0)
+00100073  // ebreak
