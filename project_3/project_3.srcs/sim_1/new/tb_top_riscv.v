@@ -27,6 +27,11 @@ module tb_top_riscv;
     localparam integer CAP_WORDS   = 1 << (IMEM_ADDR_W - 2);
     localparam integer RX_TIMEOUT  = 40 * 10 * BIT_CLKS;
     localparam [31:0]  NOP         = 32'h0000_0013;
+    // Palabras del bus de debug: 9 de IF/ID e ID + 32 registros + 7 de EX.
+    // Tiene que coincidir con DBG_COUNT de cpu.v.
+    localparam integer DBG_REGS_AT = 9;
+    localparam integer DBG_EX_AT   = 41;
+    localparam integer DBG_NWORDS  = 48;
 
     reg        clk = 1'b0;
     reg        rst_btn;
@@ -247,18 +252,41 @@ module tb_top_riscv;
         begin
             dump;
             regs_ok = 1;
-            for (r = 9; r < 41; r = r + 1)
+            for (r = DBG_REGS_AT; r < DBG_EX_AT; r = r + 1)
                 if (dw[r] !== 32'd0) regs_ok = 0;      // sin WB todavia: registros en 0
             checks = checks + 1;
-            if (dcount !== 41 || dw[0] !== pc || dw[1] !== instr || dw[3] !== ctrl || dw[4] !== fields ||
+            if (dcount !== DBG_NWORDS || dw[0] !== pc || dw[1] !== instr || dw[3] !== ctrl || dw[4] !== fields ||
                 dw[5] !== 32'd0 || dw[6] !== 32'd0 || dw[7] !== imm || dw[8] !== jal_target || !regs_ok) begin
                 errors = errors + 1;
-                $display("FAIL t=%0t: ID pc=%h instr=%h ctrl=%h campos=%h imm=%h jal=%h",
-                         $time, dw[0], dw[1], dw[3], dw[4], dw[7], dw[8]);
+                $display("FAIL t=%0t: ID pc=%h instr=%h ctrl=%h campos=%h imm=%h jal=%h n=%0d",
+                         $time, dw[0], dw[1], dw[3], dw[4], dw[7], dw[8], dcount);
             end
             else begin
                 $display("OK   ID pc=%h instr=%h ctrl=%h campos=%h imm=%h destino_jal=%h",
                          dw[0], dw[1], dw[3], dw[4], dw[7], dw[8]);
+            end
+        end
+    endtask
+
+// Dump y chequeo de las salidas de EX (resultado, operandos, destino, flags)
+    task expect_ex(input [31:0] alu_result, input [31:0] alu_a, input [31:0] alu_b,
+                   input [31:0] target, input [31:0] pc4, input [31:0] ctrl);
+        begin
+            dump;
+            checks = checks + 1;
+            if (dcount !== DBG_NWORDS || dw[DBG_EX_AT] !== alu_result ||
+                dw[DBG_EX_AT+1] !== alu_a || dw[DBG_EX_AT+2] !== alu_b ||
+                dw[DBG_EX_AT+3] !== target || dw[DBG_EX_AT+4] !== pc4 ||
+                dw[DBG_EX_AT+5] !== ctrl) begin
+                errors = errors + 1;
+                $display("FAIL t=%0t: EX r=%h a=%h b=%h tgt=%h pc4=%h ctrl=%h n=%0d",
+                         $time, dw[DBG_EX_AT], dw[DBG_EX_AT+1], dw[DBG_EX_AT+2],
+                         dw[DBG_EX_AT+3], dw[DBG_EX_AT+4], dw[DBG_EX_AT+5], dcount);
+            end
+            else begin
+                $display("OK   EX r=%h a=%h b=%h tgt=%h pc4=%h ctrl=%h",
+                         dw[DBG_EX_AT], dw[DBG_EX_AT+1], dw[DBG_EX_AT+2],
+                         dw[DBG_EX_AT+3], dw[DBG_EX_AT+4], dw[DBG_EX_AT+5]);
             end
         end
     endtask
@@ -390,10 +418,11 @@ module tb_top_riscv;
         prog[3] = 32'h00200093;                        // 0x0c (salteada por el jal)
         prog[4] = 32'h00100073;                        // 0x10 ebreak
         load_program(5, "K");
+        dump;
         checks = checks + 1;
-        if (dcount !== 41) begin
+        if (dcount !== DBG_NWORDS) begin
             errors = errors + 1;
-            $display("FAIL: el dump tiene %0d palabras, esperadas 41", dcount);
+            $display("FAIL: el dump tiene %0d palabras, esperadas %0d", dcount, DBG_NWORDS);
         end
         step_n(1);
         expect_id(32'h00, 32'h00500093, 32'h0000_0101, 32'h0000_0400, 32'h5, 32'h5);
@@ -401,8 +430,15 @@ module tb_top_riscv;
         expect_id(32'h04, 32'h00c000ef, 32'h0000_1311, 32'h0000_0400, 32'hc, 32'h10);
         uart_send("R");
         expect_reply("K");
-        expect_reply("H");                             // frena con el ebreak en ID
-        expect_id(32'h10, 32'h00100073, 32'h0000_0040, 32'h0000_0000, 32'h1, 32'h11);
+        expect_reply("H");                             // frena con el ebreak en EX
+        // El halt sale de EX (ID/EX), asi que cuando el pipeline se congela el
+        // ebreak ya no esta en ID: quedo una instruccion mas en ID. Se chequea
+        // la etapa EX, que es donde tiene que estar el ebreak.
+        // ebreak: alu 0+0 con op=add -> 0, zero=1; sin branch ni jalr no redirige.
+        // target = pc + imm = 0x10 + 1 = 0x11 (se muestra aunque no se use).
+        expect_ex(32'h0000_0000, 32'h0000_0000, 32'h0000_0000,
+                  32'h0000_11, 32'h0000_14, 32'h0000_10);
+        expect_id(32'h14, 32'h0000_0013, 32'h0000_0100, 32'h0000_0000, 32'h0, 32'h14);
         uart_send("S");
         expect_reply("H");
 

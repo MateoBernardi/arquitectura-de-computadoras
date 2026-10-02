@@ -1,13 +1,16 @@
 `timescale 1ns / 1ps
 // -----------------------------------------------------------------------------
-// tb_cpu_decode: demostracion de IF -> IF/ID -> ID sobre cpu (sin UART)
+// tb_cpu_decode: demostracion de IF -> IF/ID -> ID -> ID/EX -> EX sobre cpu
+// (sin UART)
 //
 // Carga decode_demo.hex en instru_mem, habilita el CPU como lo haria la debug
 // unit (enable = run & ~halt) y en cada ciclo id_monitor imprime lo que sale
 // de ID. Se chequea la secuencia que tiene que llegar a ID:
-//   NOP de reset, 0x00 .. 0x28, NOP (instruccion salteada por el JAL), 0x34,
-//   0x38 (ebreak: halt).
-// Los branches y JALR se resuelven en EX (todavia no existe): no redirigen.
+//   NOP de reset, 0x00 .. 0x28, NOP, 0x38 (ebreak: halt), NOP.
+// El BEQ de 0x24 se resuelve en EX y sale tomado (x1 == x2 == 0 todavia, no
+// hay WB que escriba), asi que redirige a 0x38: la instruccion de 0x2c se
+// convierte en NOP, el JAL de 0x28 queda en camino equivocado (llego a ID pero
+// se descarta en ID/EX) y 0x34 nunca se busca.
 //
 // Icarus (desde la raiz del proyecto):
 //   iverilog -Wall -g2005 -I rtl -s tb_cpu_decode -o tb_cpu \
@@ -111,13 +114,13 @@ module tb_cpu_decode;
         for (i = 0; i < 64; i = i + 1) dut.u_if.u_instru_mem.mem[i] = prog[i];
 
         exp_pc[0] = 32'h00; exp_instr[0] = INSTR_NOP;  // estado de reset
-        for (i = 0; i <= 10; i = i + 1) begin          // 0x00 .. 0x28
+        for (i = 0; i <= 10; i = i + 1) begin           // 0x00 .. 0x28
             exp_pc[i + 1]    = 4 * i;
             exp_instr[i + 1] = prog[i];
         end
-        exp_pc[12] = 32'h2c; exp_instr[12] = INSTR_NOP; // salteada por el JAL
-        exp_pc[13] = 32'h34; exp_instr[13] = prog[13];
-        exp_pc[14] = 32'h38; exp_instr[14] = prog[14];  // ebreak
+        exp_pc[12] = 32'h2c; exp_instr[12] = INSTR_NOP; // flush del BEQ tomado
+        exp_pc[13] = 32'h38; exp_instr[13] = prog[14];  // ebreak, destino del BEQ
+        exp_pc[14] = 32'h3c; exp_instr[14] = INSTR_NOP; // entra con el pipeline ya congelado
 
         #100;                                          // GSR de XSIM
         @(negedge clk);

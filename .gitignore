@@ -8,6 +8,7 @@
 *.log
 *.str
 *.dmp
+*.debug
 *.wdb
 *.vcd
 .Xil/

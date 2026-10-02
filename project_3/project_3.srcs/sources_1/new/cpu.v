@@ -2,16 +2,20 @@
 // -----------------------------------------------------------------------------
 // cpu: pipeline RV32I
 //
-// Estado actual: IF -> IF/ID -> ID. Las senales que van a llegar desde etapas
-// que todavia no existen estan como constantes; al agregar cada etapa se
-// instancia aca y se reemplazan. top_riscv, debug_unit y uart_core no cambian.
+// Estado actual: IF -> IF/ID -> ID -> ID/EX -> EX. Las senales que van a llegar
+// desde etapas que todavia no existen estan como constantes; al agregar cada
+// etapa se instancia aca y se reemplazan. top_riscv, debug_unit y uart_core no
+// cambian.
 //
 // - i_reset, i_enable: vienen de la debug unit. Todos los registros del
 //   pipeline (y la escritura del banco de registros) usan el mismo reset y el
 //   mismo enable.
 // - o_halt: nivel; mientras vale 1 la debug unit no habilita el CPU.
-//   PROVISORIO: sale de ID (ECALL/EBREAK en ID). Cuando exista WB, tiene que
+//   PROVISORIO: sale de EX (ECALL/EBREAK en ID/EX). Cuando exista WB, tiene que
 //   salir de MEM/WB para que las instrucciones anteriores terminen.
+// - PROVISORIO: no hay unidad de riesgos, id_pc_stall queda en 0. Con eso el
+//   pipeline corre pero pierde el dato si dos instrucciones seguidas dependen
+//   una de la otra (no hay ni stall ni forwarding todavia).
 // - Bus de debug: o_dbg_data = palabra i_dbg_addr del mapa de abajo.
 //   o_dbg_count = cantidad de palabras. Puede ser combinacional o con un
 //   ciclo de latencia (la debug unit espera un ciclo).
@@ -58,17 +62,35 @@ module cpu #(
     wire [3:0]  id_alu_op;
     wire        id_reg_write, id_mem_read, id_mem_write, id_branch, id_jalr, id_halt, id_illegal;
 
+    // ID/EX (registro) -> EX
+    wire [31:0] ex_pc, ex_pc4, ex_rs1_data, ex_rs2_data, ex_imm;
+    wire [4:0]  ex_rs1, ex_rs2, ex_rd;
+    wire [2:0]  ex_funct3;
+    wire [1:0]  ex_alu_src_a, ex_result_src;
+    wire        ex_alu_src_b;
+    wire [3:0]  ex_alu_op;
+    wire        ex_reg_write, ex_mem_read, ex_mem_write, ex_branch, ex_jalr, ex_halt, ex_illegal;
+
+    // EX -> IF
+    wire [31:0] ex_target;
+    wire        ex_redirect;
+
+    // EX -> debug (las salidas de EX todavía no van a ningun registro: falta
+    // EX/MEM)
+    wire [31:0] ex_alu_result, ex_alu_a, ex_alu_b;
+    wire        ex_alu_zero, ex_alu_overflow, ex_branch_taken;
+
     // Pendientes de las etapas siguientes
-    wire        id_pc_stall  = 1'b0;                   // unidad de riesgos (con ID/EX)
-    wire        ex_redirect  = 1'b0;                   // branch tomado o JALR en EX
-    wire [31:0] ex_target    = 32'd0;
+    wire        id_pc_stall  = 1'b0;                   // PROVISORIO: unidad de riesgos (ver id_ex_reg)
     wire        wb_reg_write = 1'b0;                   // escritura del banco de registros (WB)
     wire [4:0]  wb_rd        = 5'd0;
     wire [31:0] wb_data      = 32'd0;
 
-    // Debug: registros x0..x31 en las direcciones DBG_REGS .. DBG_REGS + 31
+    // Debug: registros x0..x31 en las direcciones DBG_REGS .. DBG_REGS + 31,
+    // y despues las palabras de cada etapa (ver el mapa al final del modulo).
     localparam [15:0] DBG_REGS  = 16'd9;
-    localparam [15:0] DBG_COUNT = DBG_REGS + 16'd32;
+    localparam [15:0] DBG_EX    = DBG_REGS + 16'd32;    // primera palabra de EX
+    localparam [15:0] DBG_COUNT = DBG_EX   + 16'd7;
     wire [15:0] dbg_reg_index = i_dbg_addr - DBG_REGS;
     wire [31:0] dbg_reg_data;
 
@@ -144,13 +166,84 @@ module cpu #(
         .o_illegal     (id_illegal)
     );
 
-    assign o_halt = id_halt;                           // PROVISORIO (ver encabezado)
+    id_ex_reg u_id_ex (
+        .i_clock          (i_clk),
+        .i_reset          (i_reset),
+        .i_pipeline_enable(i_enable),
+        .i_stall          (id_pc_stall),
+        .i_flush          (ex_redirect),
+        .i_pc             (id_pc),
+        .i_pc4            (id_pc4),
+        .i_rs1_data       (id_rs1_data),
+        .i_rs2_data       (id_rs2_data),
+        .i_imm            (id_imm),
+        .i_rs1            (id_rs1),
+        .i_rs2            (id_rs2),
+        .i_rd             (id_rd),
+        .i_funct3         (id_funct3),
+        .i_alu_src_a      (id_alu_src_a),
+        .i_alu_src_b      (id_alu_src_b),
+        .i_alu_op         (id_alu_op),
+        .i_result_src     (id_result_src),
+        .i_reg_write      (id_reg_write),
+        .i_mem_read       (id_mem_read),
+        .i_mem_write      (id_mem_write),
+        .i_branch         (id_branch),
+        .i_jalr           (id_jalr),
+        .i_halt           (id_halt),
+        .i_illegal        (id_illegal),
+        .o_pc             (ex_pc),
+        .o_pc4            (ex_pc4),
+        .o_rs1_data       (ex_rs1_data),
+        .o_rs2_data       (ex_rs2_data),
+        .o_imm            (ex_imm),
+        .o_rs1            (ex_rs1),
+        .o_rs2            (ex_rs2),
+        .o_rd             (ex_rd),
+        .o_funct3         (ex_funct3),
+        .o_alu_src_a      (ex_alu_src_a),
+        .o_alu_src_b      (ex_alu_src_b),
+        .o_alu_op         (ex_alu_op),
+        .o_result_src     (ex_result_src),
+        .o_reg_write      (ex_reg_write),
+        .o_mem_read       (ex_mem_read),
+        .o_mem_write      (ex_mem_write),
+        .o_branch         (ex_branch),
+        .o_jalr           (ex_jalr),
+        .o_halt           (ex_halt),
+        .o_illegal        (ex_illegal)
+    );
+
+    execute u_ex (
+        .i_pc          (ex_pc),
+        .i_rs1_data    (ex_rs1_data),
+        .i_rs2_data    (ex_rs2_data),
+        .i_imm         (ex_imm),
+        .i_funct3      (ex_funct3),
+        .i_alu_src_a   (ex_alu_src_a),
+        .i_alu_src_b   (ex_alu_src_b),
+        .i_alu_op      (ex_alu_op),
+        .i_branch      (ex_branch),
+        .i_jalr        (ex_jalr),
+        .o_redirect    (ex_redirect),
+        .o_target      (ex_target),
+        .o_alu_result  (ex_alu_result),
+        .o_alu_zero    (ex_alu_zero),
+        .o_alu_overflow(ex_alu_overflow),
+        .o_branch_taken(ex_branch_taken),
+        .o_alu_a       (ex_alu_a),
+        .o_alu_b       (ex_alu_b)
+    );
+
+    assign o_halt = ex_halt;                           // PROVISORIO (ver encabezado)
 
     // Mapa de debug
     //   0  IF/ID pc              3  ID control (ver abajo)   6  ID rs2_data
     //   1  IF/ID instruccion     4  ID {funct3, rd, rs2, rs1} 7  ID imm
     //   2  IF/ID pc + 4          5  ID rs1_data               8  ID destino de JAL
     //   9 .. 40  x0 .. x31
+    //   41 EX resultado de la ALU   44 EX destino del salto   46 EX flags y control
+    //   42 EX operando A            45 EX pc + 4                47 EX {funct3, rd, rs2, rs1}
     // Control: [0] reg_write [1] mem_read [2] mem_write [3] branch [4] jal
     //          [5] jalr [6] halt [7] illegal [8] alu_src_b [10:9] alu_src_a
     //          [12:11] result_src [16:13] alu_op
@@ -158,6 +251,13 @@ module cpu #(
                                  id_illegal, id_halt, id_jalr, id_jal, id_branch,
                                  id_mem_write, id_mem_read, id_reg_write};
     wire [31:0] dbg_id_fields = {14'd0, id_funct3, id_rd, id_rs2, id_rs1};
+
+    // EX: [0] branch [1] jalr [2] redirect [3] branch_taken [4] alu_zero
+    //     [5] alu_overflow [7:6] alu_src_a [8] alu_src_b [12:9] alu_op
+    wire [31:0] dbg_ex_ctrl   = {19'd0, ex_alu_op, ex_alu_src_b, ex_alu_src_a,
+                                 ex_alu_overflow, ex_alu_zero, ex_branch_taken,
+                                 ex_redirect, ex_jalr, ex_branch};
+    wire [31:0] dbg_ex_fields = {14'd0, ex_funct3, ex_rd, ex_rs2, ex_rs1};
 
     assign o_dbg_count = DBG_COUNT;
 
@@ -172,7 +272,14 @@ module cpu #(
             16'd6:   o_dbg_data = id_rs2_data;
             16'd7:   o_dbg_data = id_imm;
             16'd8:   o_dbg_data = id_jal_target;
-            default: o_dbg_data = (i_dbg_addr < DBG_COUNT) ? dbg_reg_data : 32'd0;
+            DBG_EX:      o_dbg_data = ex_alu_result;
+            DBG_EX + 1:  o_dbg_data = ex_alu_a;
+            DBG_EX + 2:  o_dbg_data = ex_alu_b;
+            DBG_EX + 3:  o_dbg_data = ex_target;
+            DBG_EX + 4:  o_dbg_data = ex_pc4;
+            DBG_EX + 5:  o_dbg_data = dbg_ex_ctrl;
+            DBG_EX + 6:  o_dbg_data = dbg_ex_fields;
+            default: o_dbg_data = (i_dbg_addr < DBG_EX) ? dbg_reg_data : 32'd0;
         endcase
     end
 endmodule

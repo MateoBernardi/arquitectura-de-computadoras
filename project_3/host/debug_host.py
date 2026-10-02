@@ -14,8 +14,8 @@ Acciones (se ejecutan en orden, en una sola conexion):
     wait [seg]      espera el aviso de halt hasta seg segundos (default 5)
     pause           detiene la ejecucion continua
     reset           reset del CPU (PC = 0); el programa se conserva
-    dump            lee el bus de debug: IF/ID, salidas de ID armadas como
-                    instruccion y banco de registros
+    dump            lee el bus de debug: IF/ID, salidas de ID y de EX, y el
+                    banco de registros
 
 Despues de run, usar wait o pause antes de dump: si el CPU llega a halt, el aviso
 'H' se enviaria antes que la respuesta del dump.
@@ -30,7 +30,10 @@ import sys
 #   0 IF/ID pc   1 IF/ID instr   2 IF/ID pc+4
 #   3 ID control   4 ID {funct3, rd, rs2, rs1}   5 ID rs1_data   6 ID rs2_data
 #   7 ID imm   8 ID destino de JAL   9..40 x0..x31
+#   41 EX alu_result   42 EX alu_a   43 EX alu_b   44 EX destino del salto
+#   45 EX pc+4   46 EX control   47 EX {funct3, rd, rs2, rs1}
 DBG_REGS = 9
+DBG_EX = 41
 
 ALU_A = {0: "rs1", 1: "pc", 2: "0"}
 RESULT = {0: "alu", 1: "mem", 2: "pc+4"}
@@ -92,6 +95,19 @@ def asm_from_id(d, pc):
     return f"{name} x{rd},x{rs1},{simm}"
 
 
+def decode_ex(words):
+    """Palabras 41..47 del dump -> salidas de EX."""
+    result, a, b, target, pc4, ctrl, fields = words[DBG_EX:DBG_EX + 7]
+    return {
+        "result": result, "a": a, "b": b, "target": target, "pc4": pc4,
+        "branch": ctrl & 1, "jalr": (ctrl >> 1) & 1, "redirect": (ctrl >> 2) & 1,
+        "branch_taken": (ctrl >> 3) & 1, "zero": (ctrl >> 4) & 1, "overflow": (ctrl >> 5) & 1,
+        "alu_src_a": (ctrl >> 6) & 3, "alu_src_b": (ctrl >> 8) & 1, "alu_op": (ctrl >> 9) & 0xF,
+        "rs1": fields & 0x1F, "rs2": (fields >> 5) & 0x1F, "rd": (fields >> 10) & 0x1F,
+        "funct3": (fields >> 15) & 7,
+    }
+
+
 def print_dump(words):
     n = len(words)
     if n >= 3:
@@ -111,7 +127,14 @@ def print_dump(words):
         print("Registros")
         for r in range(0, 32, 4):
             print("       " + "   ".join(f"x{r + i:<2}= 0x{words[DBG_REGS + r + i]:08x}" for i in range(4)))
-    for i in range(DBG_REGS + 32, n):
+    if n >= DBG_EX + 7:
+        e = decode_ex(words)
+        print(f"EX     a=0x{e['a']:08x} b=0x{e['b']:08x} op={ALU_OPS.get(e['alu_op'], '?')} "
+              f"-> 0x{e['result']:08x}   zero={e['zero']} overflow={e['overflow']}")
+        print(f"       rd=x{e['rd']} rs1=x{e['rs1']} rs2=x{e['rs2']} funct3={e['funct3']:03b} "
+              f"| branch={e['branch']} taken={e['branch_taken']} jalr={e['jalr']} "
+              f"redirect={e['redirect']} destino=0x{e['target']:08x}")
+    for i in range(DBG_EX + 7, n):
         print(f"{i:4d}  dbg[{i}] 0x{words[i]:08x}")
 
 CMD_LOAD, CMD_STEP, CMD_RUN, CMD_PAUSE, CMD_RESET, CMD_DUMP = b"L", b"S", b"R", b"P", b"X", b"D"
