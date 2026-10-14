@@ -33,7 +33,8 @@ module riscv_core (
 
     // ── 2. Instruction Fetch ──────────────────────────────────────
     wire [31:0] inst;
-    imem imem0 (.addr(pc), .instr(inst));
+    imem imem0 (.clk(clk), .addr(pc), .instr(inst),
+                .wr_en(1'b0), .wr_addr(10'd0), .wr_data(8'd0));
 
     // ── 3. Instruction Decode ─────────────────────────────────────
     wire [6:0] opcode = inst[6:0];
@@ -52,7 +53,7 @@ module riscv_core (
         .opcode(opcode), .funct3(funct3), .funct7(funct7),
         .reg_write(reg_write), .alu_src(alu_src),
         .mem_read(mem_read), .mem_write(mem_write),
-        .branch(branch), .jump(jump),
+        .branch(branch), .jump(jump), .halt(),
         .wb_sel(wb_sel), .alu_op(alu_op), .imm_sel(imm_sel)
     );
 
@@ -65,7 +66,7 @@ module riscv_core (
     wire [31:0] rdata1, rdata2;
     reg  [31:0] wr_data;
     regfile rf (
-        .clk(clk), .we(reg_write),
+        .clk(clk), .rst(rst), .we(reg_write), .dbg_addr(5'd0), .dbg_data(),
         .waddr(rd), .wdata(wr_data),
         .raddr1(rs1), .rdata1(rdata1),
         .raddr2(rs2), .rdata2(rdata2)
@@ -91,7 +92,8 @@ module riscv_core (
     dmem dmem0 (
         .clk(clk), .we(mem_write),
         .addr(alu_out), .wdata(rdata2),
-        .funct3(funct3), .rdata(dmem_rdata)
+        .funct3(funct3), .rdata(dmem_rdata),
+        .dbg_addr(8'd0), .dbg_data()
     );
 
     // ── 9. Branch Unit ────────────────────────────────────────────

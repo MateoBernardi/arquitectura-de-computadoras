@@ -18,3 +18,8 @@ set_property -dict { PACKAGE_PIN N17 IOSTANDARD LVCMOS33 } [get_ports { i_reset 
 ## drives for the PC to receive (so it's our o_tx).
 set_property -dict { PACKAGE_PIN C4  IOSTANDARD LVCMOS33 } [get_ports { i_rx }];
 set_property -dict { PACKAGE_PIN D4  IOSTANDARD LVCMOS33 } [get_ports { o_tx }];
+
+## LEDs: LD0 = CPU enabled, LD1 = CPU in reset (loading), LD2 = halt
+set_property -dict { PACKAGE_PIN H17 IOSTANDARD LVCMOS33 } [get_ports { o_led[0] }];
+set_property -dict { PACKAGE_PIN K15 IOSTANDARD LVCMOS33 } [get_ports { o_led[1] }];
+set_property -dict { PACKAGE_PIN J13 IOSTANDARD LVCMOS33 } [get_ports { o_led[2] }];

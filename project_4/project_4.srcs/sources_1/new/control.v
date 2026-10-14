@@ -9,6 +9,7 @@ module control (
     output reg        mem_write,
     output reg        branch,
     output reg        jump,
+    output reg        halt,     // ECALL/EBREAK (any SYSTEM opcode) -> stop the CPU
     output reg  [1:0] wb_sel,   // 00=ALU,01=MEM,10=PC+4,11=Uimm
     output reg  [3:0] alu_op,
     output reg  [2:0] imm_sel
@@ -24,10 +25,11 @@ module control (
     localparam JALR= 7'b1100111;  // jalr
     localparam LUI = 7'b0110111;  // lui
     localparam AUIP= 7'b0010111;  // auipc
+    localparam SYS = 7'b1110011;  // ecall / ebreak
 
     always @(*) begin
         // defaults - safe values
-        {reg_write,alu_src,mem_read,mem_write,branch,jump}=6'b0;
+        {reg_write,alu_src,mem_read,mem_write,branch,jump,halt}=7'b0;
         wb_sel=2'b00; alu_op=OP_ADD; imm_sel=3'b000;
         case (opcode)
             R:    begin reg_write=1; alu_src=0; wb_sel=2'b00;
@@ -64,6 +66,7 @@ module control (
             JALR: begin reg_write=1; alu_src=1; jump=1; wb_sel=2'b10; imm_sel=3'b000; alu_op=OP_ADD; end
             LUI:  begin reg_write=1; wb_sel=2'b11; imm_sel=3'b011; end
             AUIP: begin reg_write=1; alu_src=1; wb_sel=2'b00; imm_sel=3'b011; alu_op=OP_ADD; end
+            SYS:  halt=1;
             default: ;
         endcase
     end

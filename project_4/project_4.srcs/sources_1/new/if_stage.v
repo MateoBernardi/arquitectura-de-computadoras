@@ -29,6 +29,7 @@ module if_stage (
     output wire [31:0] pc,        // current PC
     output wire [31:0] instr      // fetched instruction
 );
-    pc   pc_reg  (.clk(clk), .rst(rst), .pc_next(pc_next), .pc(pc));
-    imem imem_mod(.addr(pc), .instr(instr));
+    pc   pc_reg  (.clk(clk), .rst(rst), .en(1'b1), .pc_next(pc_next), .pc(pc));
+    imem imem_mod(.clk(clk), .addr(pc), .instr(instr),
+                  .wr_en(1'b0), .wr_addr(10'd0), .wr_data(8'd0));
 endmodule

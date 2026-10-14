@@ -51,8 +51,8 @@ module tb_riscv_core;
 
         // Check: memory address 0 should contain 15 (sum 1..5)
         // DMEM is byte-addressed; word at addr 0 = bytes [3:0]
-        result = {dut.dmem0.mem[3], dut.dmem0.mem[2],
-                  dut.dmem0.mem[1], dut.dmem0.mem[0]};
+        result = {dut.dmem0.lane3[0], dut.dmem0.lane2[0],
+                  dut.dmem0.lane1[0], dut.dmem0.lane0[0]};
         if (result === 32'd15)
             $display("PASS: sum(1..5) = %0d stored at mem[0]", result);
         else

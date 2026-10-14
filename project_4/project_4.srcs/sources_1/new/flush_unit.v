@@ -1,33 +1,12 @@
 `timescale 1ns / 1ps
-//////////////////////////////////////////////////////////////////////////////////
-// Company: 
-// Engineer: 
-// 
-// Create Date: 10/13/2026 05:44:17 PM
-// Design Name: 
-// Module Name: flush_unit
-// Project Name: 
-// Target Devices: 
-// Tool Versions: 
-// Description: 
-// 
-// Dependencies: 
-// 
-// Revision:
-// Revision 0.01 - File Created
-// Additional Comments:
-// 
-//////////////////////////////////////////////////////////////////////////////////
 
-// flush_unit.v - Inserts NOP bubbles on branch taken
-// When branch_taken is asserted, the two instructions that entered
-// IF and ID after the branch must be flushed.
+// flush_unit: a taken branch or any jump is resolved in EX, so the two younger
+// instructions (in IF/ID and in ID/EX's input) are wrong-path and become bubbles.
 module flush_unit (
-    input  branch_taken,
-    output flush_if_id,   // flush IF/ID register (the instr after branch)
-    output flush_id_ex    // flush ID/EX register (two after branch)
+    input  redirect,      // EX: taken branch, JAL or JALR
+    output flush_if_id,   // flush IF/ID register (the instr after the jump)
+    output flush_id_ex    // flush ID/EX register (two after the jump)
 );
-    // Both stages get a bubble simultaneously when branch is taken
-    assign flush_if_id = branch_taken;
-    assign flush_id_ex = branch_taken;
+    assign flush_if_id = redirect;
+    assign flush_id_ex = redirect;
 endmodule
