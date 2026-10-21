@@ -32,3 +32,6 @@ __pycache__/
 
 # TP1 ya no se versiona
 /TP1/
+
+# Notas de revision personal (no se versionan)
+project_4/NOTAS_REVISION.md
