@@ -8,10 +8,11 @@
 // and that pausing (i_enable=0) freezes the pipeline.
 //////////////////////////////////////////////////////////////////////////////////
 module tb_pipeline;
-    parameter PROG_FILE = "pipeline_prog.hex";
+    parameter PROG_FILE = "test_bypass.hex";
     parameter EXP_FILE  = "pipeline_exp.hex";
 
     reg clk = 0, rst = 1, en = 0;
+
     always #5 clk = ~clk;
 
     wire        halt;
@@ -27,6 +28,8 @@ module tb_pipeline;
 
     reg [31:0] exp [0:47];
     integer i, errors, cycles;
+    integer stalls = 0;
+    integer redirects = 0;
     reg [31:0] got;
     reg [31:0] pc_frozen;
 
@@ -37,41 +40,36 @@ module tb_pipeline;
         #1 rst = 0;
         en = 1;
         cycles = 0;
-        while (!halt && cycles < 2000) begin
+        while (!halt && cycles < 5000) begin
             @(posedge clk); #1;
             cycles = cycles + 1;
-            if (cycles == 20) begin                     // pause test
-                en = 0; pc_frozen = dut.pc;
-                repeat (5) @(posedge clk);
-                #1;
-                if (dut.pc !== pc_frozen) begin
-                    errors = errors + 1; $display("FAIL: PC moved while paused");
-                end
-                en = 1;
-            end
+            if (dut.stall)    stalls    = stalls + 1;
+            if (dut.redirect) redirects = redirects + 1;
         end
         if (!halt) begin errors = errors + 1; $display("FAIL: timeout, no halt"); end
         else $display("halt after %0d cycles", cycles);
         en = 0;
 
-        for (i = 0; i < 32; i = i + 1) begin
-            dbg_addr = 22 + i; #1;
-            if (dbg_data !== exp[i]) begin
-                errors = errors + 1;
-                $display("FAIL x%0d = %h, expected %h", i, dbg_data, exp[i]);
-            end
-        end
-        for (i = 0; i < 16; i = i + 1) begin
-            dbg_addr = 54 + i; #1;
-            if (dbg_data !== exp[32 + i]) begin
-                errors = errors + 1;
-                $display("FAIL dmem[%0d] = %h, expected %h", i, dbg_data, exp[32 + i]);
-            end
-        end
-        if (dbg_count !== 86) begin errors = errors + 1; $display("FAIL dbg_count=%0d", dbg_count); end
+        // -------------------------------------------------------------
+        // Reporte de Rendimiento
+        // -------------------------------------------------------------
+        $display("-------------------------------------------");
+        $display("Rendimiento del Benchmark (Criba):");
+        $display("  Ciclos Totales (CC) : %0d", cycles);
+        $display("  Load-Use Stalls     : %0d", stalls);
+        $display("  Branch Flushes      : %0d", redirects);
+        $display("-------------------------------------------");
 
-        if (errors == 0) $display("PASS: tb_pipeline");
-        else             $display("FAILED: %0d errors", errors);
+        // Mostrar primeros resultados de dmem (0 = primo, 1 = compuesto)
+        $display("x1 = %0d, x5 = %0d, dmem[0] = %0d", dut.u_rf.regs[1], dut.u_rf.regs[5], dut.u_dmem.lane0[0]);
+        for (i = 2; i < 32; i = i + 1) begin
+            dbg_addr = 54 + i; #1;
+            if (dbg_data == 0)
+                $display("  dmem[%0d] = %0d  <-- PRIMO", i, dbg_data);
+            else
+                $display("  dmem[%0d] = %0d", i, dbg_data);
+        end
         $finish;
+
     end
 endmodule

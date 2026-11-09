@@ -625,7 +625,7 @@ class App:
             self.regtree.item(str(i), values=(f"x{i}", ABI[i], f"0x{v:08x}", str(v - (1 << 32) if v >> 31 else v)),
                               tags=("changed",) if changed else ())
         self.prev_regs = d["regs"]
-        lines = [f"[{4 * i:04x}] 0x{v:08x}  {v}" for i, v in enumerate(d["dmem"])]
+        lines = [f"[{4 * i:04x}] 0x{v:08x}  {v - (1 << 32) if v >> 31 else v}" for i, v in enumerate(d["dmem"])]
         self._set_text(self.dmemview, "\n".join(lines))
 
     # ------------------------------------------------------------ archivos

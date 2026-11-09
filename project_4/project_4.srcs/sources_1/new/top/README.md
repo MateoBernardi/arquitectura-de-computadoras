@@ -140,6 +140,6 @@ assign o_led = {cpu_halt, cpu_reset, cpu_enable};
 
 | LED | Significado |
 |---|---|
-| `[0]` | el CPU está habilitado (corriendo o en pause) |
-| `[1]` | el CPU está en reset (cargando o reseteado) |
-| `[2]` | el CPU llegó a un halt |
+| `[0]` | `cpu_enable`: el CPU avanza ciclos. Fijo durante `R`; en `S` es un pulso de un ciclo (no se ve); apagado en pause, en halt y durante un dump |
+| `[1]` | `cpu_reset`: el CPU está en reset. Encendido mientras dura una carga (`L`), mientras se aprieta BTNC o si el MMCM no enganchó; el `X` es un pulso de un ciclo (no se ve) |
+| `[2]` | `cpu_halt`: un ECALL/EBREAK llegó a WB. Queda encendido hasta el próximo reset o carga |

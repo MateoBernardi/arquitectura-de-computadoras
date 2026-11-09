@@ -67,7 +67,7 @@ module dmem #(parameter DEPTH = 256) (
     wire [7:0] d0 = wdata[7:0];
     wire [7:0] d1 = sb ? wdata[7:0]  : wdata[15:8];
     wire [7:0] d2 = sw ? wdata[23:16] : wdata[7:0];
-    wire [7:0] d3 = sw ? wdata[31:24] : wdata[15:8];
+    wire [7:0] d3 = sw ? wdata[31:24] : (sb ? wdata[7:0] : wdata[15:8]);
 
     always @(posedge clk) begin
         if (we && funct3[2] == 1'b0 && funct3[1:0] != 2'b11) begin

@@ -63,6 +63,9 @@ Un byte de comando por UART. Cada comando tiene una respuesta.
 `H` (halt) también llega **espontáneo**: si el CPU llega a un ECALL/EBREAK mientras
 está en modo `R`, la debug unit responde `H` sola.
 
+`L` y `X` resetean el CPU (PC, registros y pipeline) pero **no borran la dmem**:
+ver [La dmem entre programas](../pipeline/4_memory/README.md#la-dmem-entre-programas).
+
 El `count` del dump lo define el CPU (`i_dbg_count`): son las 86 palabras del mapa
 de debug (ver [`../pipeline/README.md`](../pipeline/README.md)).
 
