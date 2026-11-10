@@ -1,0 +1,38 @@
+# forward_unit.  Correr con:  ./run.sh
+#
+# Tareas:
+#   prove     — demuestra P1..P5 sobre el RTL real
+#   cover     — encuentra un ejemplo concreto para cada cover (c1..c6)
+#   mut_*     — mismas propiedades sobre versiones con un error inyectado
+#               (las genera run.sh en mutants/); se ESPERA que fallen
+[tasks]
+prove
+cover
+mut_prio
+mut_x0
+mut_rs2
+
+[options]
+~cover: mode prove
+cover:  mode cover
+depth 1
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+read -formal forward_unit_props.sv
+prove:       read -formal forward_unit.v
+cover:       read -formal forward_unit.v
+mut_prio:    read -formal forward_unit_mut_prio.v
+mut_x0:      read -formal forward_unit_mut_x0.v
+mut_rs2:     read -formal forward_unit_mut_rs2.v
+proc -norom
+prep -top forward_unit_props
+
+[files]
+forward_unit_props.sv
+../../project_4.srcs/sources_1/new/pipeline/flow/forward_unit.v
+build/mutants/forward_unit_mut_prio.v
+build/mutants/forward_unit_mut_x0.v
+build/mutants/forward_unit_mut_rs2.v

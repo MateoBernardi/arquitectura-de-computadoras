@@ -209,3 +209,15 @@ py -m unittest discover -s tests -v
 ```
 
 No necesitan la FPGA: el puerto serie y el assembler están simulados.
+
+---
+
+## 8. Verificación formal
+
+`verif/` verifica formalmente el CPU con herramientas libres (Yosys, SymbiYosys,
+[riscv-formal](https://github.com/YosysHQ/riscv-formal)), sin Vivado: el CPU completo contra
+la ISA RV32I, y contratos de módulos individuales (forwarding, hazards, control del
+pipeline, ALU, memoria de datos). Ver [verif/README.md](verif/README.md).
+
+`riscv_pipeline.v` tiene un bloque `ifdef RISCV_FORMAL` con la interfaz RVFI que usa
+riscv-formal. Vivado no define esa macro, así que no forma parte del hardware sintetizado.

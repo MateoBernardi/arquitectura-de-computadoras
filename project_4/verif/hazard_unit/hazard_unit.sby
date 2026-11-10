@@ -1,0 +1,46 @@
+# hazard_unit.  Correr con:  ./run.sh
+#
+# Tareas:
+#   prove        — seguridad (S1..S3) sobre el RTL real
+#   cover        — clasifica qué formatos de instrucción sufren stalls falsos
+#   exact        — seguridad + precisión (E1) sobre el RTL real: se ESPERA FAIL
+#   precise      — seguridad + precisión sobre la variante hazard_unit_precise
+#   mut_*        — mutantes del RTL real; se ESPERA FAIL
+[tasks]
+prove
+cover
+exact
+precise
+mut_rs2
+mut_load
+
+[options]
+~cover: mode prove
+cover:  mode cover
+depth 1
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+prove:    read -formal hazard_unit_props.sv
+cover:    read -formal hazard_unit_props.sv
+exact:    read -formal -DEXACT -DLEGAL_ONLY hazard_unit_props.sv
+precise:  read -formal -DEXACT -DPRECISE hazard_unit_props.sv
+mut_rs2:  read -formal hazard_unit_props.sv
+mut_load: read -formal hazard_unit_props.sv
+prove:    read -formal hazard_unit.v
+cover:    read -formal hazard_unit.v
+exact:    read -formal hazard_unit.v
+precise:  read -formal hazard_unit_precise.v
+mut_rs2:  read -formal hazard_unit_mut_rs2.v
+mut_load: read -formal hazard_unit_mut_load.v
+proc -norom
+prep -top hazard_unit_props
+
+[files]
+hazard_unit_props.sv
+../variants/hazard_unit_precise.v
+../../project_4.srcs/sources_1/new/pipeline/flow/hazard_unit.v
+build/mutants/hazard_unit_mut_rs2.v
+build/mutants/hazard_unit_mut_load.v

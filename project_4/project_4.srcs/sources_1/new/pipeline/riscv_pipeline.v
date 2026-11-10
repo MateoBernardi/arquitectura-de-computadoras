@@ -35,6 +35,9 @@ module riscv_pipeline #(
     parameter IMEM_ADDR_W = 10,           // imem size: 2**IMEM_ADDR_W bytes
     parameter IMEM_INIT   = ""
 ) (
+`ifdef RISCV_FORMAL
+    `RVFI_OUTPUTS,                // puertos RVFI: solo para riscv-formal
+`endif
     input  wire                   clk,
     input  wire                   i_rst,
     input  wire                   i_enable,
@@ -320,4 +323,133 @@ module riscv_pipeline #(
     end
 
     assign o_dbg_count = DBG_COUNT;
+`ifdef RISCV_FORMAL
+    // ======================================================================
+    // RVFI (RISC-V Formal Interface) — SOLO para verificación con riscv-formal.
+    // Vivado no define RISCV_FORMAL, así que nunca sintetiza este bloque.
+    //
+    // Cada instrucción lleva consigo, etapa por etapa, lo que RVFI informa al
+    // retirarse en WB: su PC, su codificación, los operandos que REALMENTE
+    // usó en EX (después del forwarding) y su acceso a memoria. Estos
+    // registros son copias pasivas: no influyen en el funcionamiento del CPU.
+    // ======================================================================
+
+    // ---- IF/ID: ¿hay una instrucción real (no un NOP de flush/reset)?
+    reg f_id_valid;
+    always @(posedge clk) begin
+        if (rst)              f_id_valid <= 1'b0;
+        else if (en) begin
+            if (flush_if_id)  f_id_valid <= 1'b0;
+            else if (!stall)  f_id_valid <= 1'b1;
+        end
+    end
+
+    // ---- ID/EX
+    reg        f_ex_valid;
+    reg [31:0] f_ex_insn;
+    always @(posedge clk) begin
+        if (rst || (en && flush_id_ex)) f_ex_valid <= 1'b0;
+        else if (en) begin
+            f_ex_valid <= f_id_valid;
+            f_ex_insn  <= id_inst;
+        end
+    end
+
+    // ---- EX: próximo PC, operandos usados y "trampas" que este CPU no implementa
+    wire [31:0] f_ex_pc_wdata = redirect ? redirect_target : ex_pc + 32'd4;
+    wire        f_ex_misjump  = redirect && redirect_target[1:0] != 2'b00;
+    wire        f_ex_mismem   = (ex_mem_read || ex_mem_write) &&
+                                ((ex_funct3[1:0] == 2'd2 && alu_out[1:0] != 2'd0) ||
+                                 (ex_funct3[1:0] == 2'd1 && alu_out[0]   != 1'b0));
+    // RV32I exige una excepción en estos casos; este CPU no tiene excepciones,
+    // así que RVFI los marca como 'trap' (ver verif/rvfi/README.md).
+    wire        f_ex_trap     = ex_halt || f_ex_misjump || f_ex_mismem;
+
+    // ---- EX/MEM
+    reg        f_mem_valid, f_mem_trap;
+    reg [31:0] f_mem_insn, f_mem_pc, f_mem_pc_wdata, f_mem_rs1_rdata, f_mem_rs2_rdata;
+    reg [4:0]  f_mem_rs1, f_mem_rs2;
+    always @(posedge clk) begin
+        if (rst) f_mem_valid <= 1'b0;
+        else if (en) begin
+            f_mem_valid     <= f_ex_valid;
+            f_mem_trap      <= f_ex_trap;
+            f_mem_insn      <= f_ex_insn;
+            f_mem_pc        <= ex_pc;
+            f_mem_pc_wdata  <= f_ex_pc_wdata;
+            f_mem_rs1       <= ex_rs1;
+            f_mem_rs2       <= ex_rs2;
+            f_mem_rs1_rdata <= fwd_a_val;
+            f_mem_rs2_rdata <= fwd_b_val;
+        end
+    end
+
+    // ---- MEM: el acceso a memoria, en formato RVFI (dirección alineada a 4,
+    //      máscaras y datos en el carril de byte que corresponde)
+    wire [1:0]  f_boff  = mem_alu_out[1:0];
+    wire [3:0]  f_size  = (mem_funct3[1:0] == 2'd0) ? 4'b0001 :
+                          (mem_funct3[1:0] == 2'd1) ? 4'b0011 : 4'b1111;
+    wire [3:0]  f_mask  = f_size << f_boff;
+    wire [31:0] f_mem_addr  = {mem_alu_out[31:2], 2'b00};
+    wire [3:0]  f_mem_rmask = mem_mem_read  ? f_mask : 4'b0000;
+    wire [3:0]  f_mem_wmask = mem_mem_write ? f_mask : 4'b0000;
+    wire [31:0] f_mem_rdata = mem_rdata  << (8 * f_boff);
+    wire [31:0] f_mem_wdata = mem_rdata2 << (8 * f_boff);
+
+    // ---- MEM/WB
+    reg        f_wb_valid, f_wb_trap;
+    reg [31:0] f_wb_insn, f_wb_pc, f_wb_pc_wdata, f_wb_rs1_rdata, f_wb_rs2_rdata;
+    reg [4:0]  f_wb_rs1, f_wb_rs2;
+    reg [31:0] f_wb_mem_addr, f_wb_mem_rdata, f_wb_mem_wdata;
+    reg [3:0]  f_wb_mem_rmask, f_wb_mem_wmask;
+    always @(posedge clk) begin
+        if (rst) f_wb_valid <= 1'b0;
+        else if (en) begin
+            f_wb_valid     <= f_mem_valid;
+            f_wb_trap      <= f_mem_trap;
+            f_wb_insn      <= f_mem_insn;
+            f_wb_pc        <= f_mem_pc;
+            f_wb_pc_wdata  <= f_mem_pc_wdata;
+            f_wb_rs1       <= f_mem_rs1;
+            f_wb_rs2       <= f_mem_rs2;
+            f_wb_rs1_rdata <= f_mem_rs1_rdata;
+            f_wb_rs2_rdata <= f_mem_rs2_rdata;
+            f_wb_mem_addr  <= f_mem_addr;
+            f_wb_mem_rmask <= f_mem_rmask;
+            f_wb_mem_wmask <= f_mem_wmask;
+            f_wb_mem_rdata <= f_mem_rdata;
+            f_wb_mem_wdata <= f_mem_wdata;
+        end
+    end
+
+    // ---- WB: la instrucción se retira (solo en los ciclos en que el CPU avanza)
+    reg [63:0] f_order;
+    always @(posedge clk) begin
+        if (rst)             f_order <= 64'd0;
+        else if (rvfi_valid) f_order <= f_order + 64'd1;
+    end
+
+    wire [4:0] f_rd = wb_reg_write ? wb_rd : 5'd0;
+    assign rvfi_valid     = !rst && en && f_wb_valid;
+    assign rvfi_order     = f_order;
+    assign rvfi_insn      = f_wb_insn;
+    assign rvfi_trap      = f_wb_trap;
+    assign rvfi_halt      = wb_halt;
+    assign rvfi_intr      = 1'b0;
+    assign rvfi_mode      = 2'd3;
+    assign rvfi_ixl       = 2'd1;
+    assign rvfi_rs1_addr  = f_wb_rs1;
+    assign rvfi_rs2_addr  = f_wb_rs2;
+    assign rvfi_rs1_rdata = f_wb_rs1_rdata;
+    assign rvfi_rs2_rdata = f_wb_rs2_rdata;
+    assign rvfi_rd_addr   = f_rd;
+    assign rvfi_rd_wdata  = (f_rd != 5'd0) ? wb_result : 32'd0;
+    assign rvfi_pc_rdata  = f_wb_pc;
+    assign rvfi_pc_wdata  = f_wb_pc_wdata;
+    assign rvfi_mem_addr  = f_wb_mem_addr;
+    assign rvfi_mem_rmask = f_wb_mem_rmask;
+    assign rvfi_mem_wmask = f_wb_mem_wmask;
+    assign rvfi_mem_rdata = f_wb_mem_rdata;
+    assign rvfi_mem_wdata = f_wb_mem_wdata;
+`endif
 endmodule

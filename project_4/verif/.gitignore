@@ -1,0 +1,3 @@
+# todo lo que generan sby / run.sh queda en build/ de cada lección
+build/
+__pycache__/
