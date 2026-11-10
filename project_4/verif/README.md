@@ -84,3 +84,33 @@ el RTL no se toca:
   (`dut.x`). `check -assert` hace que cualquier cable sin conectar sea un error.
 - **`proc -norom`.** Sin esta opción, Yosys convierte el `case` de `control.v` en una ROM. Una
   ROM es estado, y en la inducción arrancaría con contenido arbitrario.
+
+## Plan: cumplimiento de RV32I
+
+**Configuración declarada:** RV32I sin la arquitectura privilegiada (sin Sm ni Zicsr, sin
+CSRs de M-mode). Las excepciones que exige la ISA se implementan como **fatal traps**, que
+la spec no privilegiada permite: el entorno de ejecución (la debug unit) detiene la
+ejecución.
+
+| Condición | Comportamiento |
+|---|---|
+| instrucción ilegal (incluye `csr*`, porque no hay Zicsr) | fatal trap, causa "illegal" |
+| salto o branch tomado a una dirección no alineada | fatal trap **en el salto** (el PC nunca queda desalineado) |
+| load/store desalineado | fatal trap |
+| acceso fuera de la imem o la dmem (hoy da la vuelta en silencio) | fatal trap ("access fault") |
+| `ecall` | halt, causa "ecall" |
+| `ebreak` | halt (devuelve el control al debugger, como dice la spec) |
+
+En todos los casos, la instrucción que falla **no escribe nada**, no se ejecuta nada más
+joven, y la causa y el PC quedan visibles en palabras nuevas al final del mapa de debug
+(`debug_protocol.py` y la GUI se actualizan).
+
+**Pasos:**
+1. Simulador: el RTL con Verilator (`sim/`), con memorias grandes solo en simulación (un
+   parámetro `DMEM_DEPTH` nuevo, con el valor por defecto actual) y la misma imagen
+   cargada en la imem y en la dmem. Corre los tests oficiales **riscv-arch-test (ACT4)**,
+   autoverificados contra Sail. Requiere `gcc-riscv64-unknown-elf`,
+   `picolibc-riscv64-unknown-elf`, `ruby-full`, `ruby-bundler` y `mise`.
+2. Correr el CPU actual con la suite completa (riscv-formal + ACT4) y listar las fallas.
+3. Implementar los fatal traps, el chequeo de rango y los cambios del mapa de debug, y
+   repetir hasta que pase todo.

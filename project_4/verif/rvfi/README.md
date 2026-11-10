@@ -5,9 +5,8 @@ verificar formalmente procesadores RISC-V. Cada chequeo es un BMC desde el reset
 **cualquier** secuencia de instrucciones.
 
 ```bash
-./run.sh                      # checks.cfg: el diseño actual (todos los chequeos)
+./run.sh                      # checks.cfg: el diseño actual, contra el estándar completo
 ./run.sh nostall              # nostall.cfg: variante sin stall de load-use
-./run.sh strict               # strict.cfg: sin suposiciones, contra el estándar completo
 ./run.sh checks reg_ch0       # un solo chequeo
 ```
 
@@ -39,28 +38,24 @@ contraejemplos están en `engine_0/trace.vcd`.
 | `causal` | ¿una escritura se retira antes que las lecturas que dependen de ella? |
 | `unique` | ¿cada instrucción se retira una sola vez? |
 | `cover` | ¿se retiran instrucciones? (que lo anterior no sea vacío) |
-| `ill` (solo `strict`) | ¿una instrucción ilegal genera una excepción? |
+| `ill` | ¿una instrucción ilegal genera una excepción? |
 
 ## Configuraciones
 
 | Archivo | Qué cambia |
 |---|---|
-| `checks.cfg` | el diseño actual, con las suposiciones de abajo |
+| `checks.cfg` | el diseño actual, **sin suposiciones** |
 | `nostall.cfg` | `hazard_unit` → `../variants/hazard_unit_nostall.v` (nunca frena) |
-| `strict.cfg` | sin suposiciones y con `ill`: todo lo que no cumple el estándar aparece como FAIL |
 
-## Suposiciones de `checks.cfg`
+## Resultado actual (`checks.cfg`): 36 PASS, 8 FAIL
 
-El estándar exige excepciones que este CPU no implementa. Para poder verificar el resto,
-`checks.cfg` asume que los programas nunca las provocan:
+| Falla | Causa |
+|---|---|
+| `insn_beq/bne/blt/bge/bltu/bgeu` | un salto a una dirección no alineada no genera una excepción: el CPU sigue ejecutando con un PC desalineado |
+| `reg` | un load/store desalineado no genera una excepción y escribe `rd`; las instrucciones con codificación inválida se ejecutan como si fueran otra |
+| `ill` | una instrucción ilegal no genera una excepción |
 
-- **Sin saltos a direcciones no alineadas ni accesos desalineados.** El RVFI marca esas
-  instrucciones con `rvfi_trap`, y `wrapper.sv` asume que no se retiran (salvo
-  `ecall`/`ebreak`, que son trap + halt).
-- **Sin chequeo de instrucciones ilegales** (`ill`).
-
-`strict.cfg` quita las dos suposiciones. Los resultados están en `../README.md` y en el
-reporte de cumplimiento.
+Se corrigen con *fatal traps* (ver `../README.md`, "Plan").
 
 ## Fuera del alcance de riscv-formal
 

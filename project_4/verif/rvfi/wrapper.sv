@@ -30,12 +30,4 @@ module rvfi_wrapper (
         `RVFI_CONN
     );
 
-    // ENTORNO: este CPU no implementa excepciones. Lo que en RV32I sería una
-    // trampa (salto a dirección no alineada, acceso desalineado) el RVFI lo
-    // marca con rvfi_trap, pero el CPU igual escribe rd y sigue. Restringimos
-    // las pruebas a programas que nunca hacen eso; ECALL/EBREAK (trap + halt)
-    // sí se permiten: son la forma de terminar un programa.
-`ifndef TP4_STRICT            // strict.cfg la desactiva para ver las diferencias
-    always @* if (!reset && rvfi_valid && rvfi_trap) assume (rvfi_halt);
-`endif
 endmodule
