@@ -1,0 +1,141 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/riscv/riscv-unified-db/main/spec/schemas/config_schema.json
+# SPDX-License-Identifier: Apache-2.0
+#
+# Configuración UDB del CPU de project_4: RV32I sin arquitectura privilegiada.
+# Basada en config/cores/picorv32 de riscv-arch-test, que también es un core sin CSRs.
+#
+# - No hay CSRs (ni Zicsr, ni Zicntr): csr* es una instrucción ilegal.
+# - Toda excepción es un "fatal trap" (spec no privilegiada, sección 1.6): el CPU se
+#   detiene, y la debug unit (el entorno de ejecución) informa la causa y el PC.
+#   Es precisa: la instrucción que falla no escribe nada y nada más joven se ejecuta.
+# - Sm se declara solo porque UDB no permite definir MXLEN sin Sm (igual que picorv32);
+#   include_priv_tests: False y STANDARD_SM_SUPPORTED sin definir dejan afuera todo
+#   test que use CSRs o modos de privilegio. Los parámetros de abajo que hablan de CSRs
+#   describen CSRs que no existen (se leen como cero y no se pueden escribir).
+---
+$schema: config_schema.json#
+kind: architecture configuration
+type: fully configured
+name: tp4-rv32i
+description: CPU segmentado de 5 etapas de project_4, RV32I, sin CSRs
+implemented_extensions:
+  - { name: I, version: "= 2.1" }
+  - { name: Sm, version: "= 1.11.0" }
+
+params:
+  MXLEN: 32
+  PHYS_ADDR_WIDTH: 32
+  M_MODE_ENDIANNESS: little
+
+  MISA_CSR_IMPLEMENTED: false
+  NON_STANDARD_EXTENSION_IMPLEMENTED: false
+
+  PRECISE_SYNCHRONOUS_EXCEPTIONS: true
+
+  TRAP_ON_ECALL_FROM_M: true
+  TRAP_ON_EBREAK: true
+  TRAP_ON_UNIMPLEMENTED_INSTRUCTION: true
+  TRAP_ON_RESERVED_INSTRUCTION: true
+  TRAP_ON_UNIMPLEMENTED_CSR: true
+  TRAP_ON_ILLEGAL_WLRL: false
+
+  WFI_FINITE: false
+  WFI_U_MODE: false
+
+  REPORT_VA_IN_MTVAL_ON_BREAKPOINT: false
+  REPORT_VA_IN_MTVAL_ON_LOAD_MISALIGNED: false
+  REPORT_VA_IN_MTVAL_ON_STORE_AMO_MISALIGNED: false
+  REPORT_VA_IN_MTVAL_ON_INSTRUCTION_MISALIGNED: false
+  REPORT_VA_IN_MTVAL_ON_LOAD_ACCESS_FAULT: false
+  REPORT_VA_IN_MTVAL_ON_STORE_AMO_ACCESS_FAULT: false
+  REPORT_VA_IN_MTVAL_ON_INSTRUCTION_ACCESS_FAULT: false
+  REPORT_ENCODING_IN_MTVAL_ON_ILLEGAL_INSTRUCTION: false
+  MTVAL_WIDTH: 32
+
+  MISALIGNED_LDST: false
+  MISALIGNED_LDST_EXCEPTION_PRIORITY: high
+
+  MARCHID_IMPLEMENTED: false
+  MIMPID_IMPLEMENTED: false
+  VENDOR_ID_BANK: 0x0
+  VENDOR_ID_OFFSET: 0x0
+
+  PMA_GRANULARITY: 2
+
+  MTVEC_ACCESS: ro
+  MTVEC_MODES: [0]
+  MTVEC_ILLEGAL_WRITE_BEHAVIOR: custom
+
+  MCOUNTINHIBIT_IMPLEMENTED: false
+  HPM_COUNTER_EN:
+    [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]
+  MCOUNTENABLE_EN:
+    [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]
+
+  NUM_PMP_ENTRIES: 0

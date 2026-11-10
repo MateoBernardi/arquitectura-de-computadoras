@@ -24,7 +24,7 @@ except Exception:                       # sin Pillow -> solapas planas
     _HAS_PIL = False
 
 from assemble import AssemblerError, INSTALL_HINT, assemble_text, hex_listing
-from debug_protocol import ABI, DebugLink, ProtocolError, decode_dump, disasm, format_stages
+from debug_protocol import ABI, DebugLink, ProtocolError, decode_dump, disasm, format_stages, format_trap
 
 IMEM_WORDS = 256                      # 2**IMEM_ADDR_W / 4 (top_riscv.v)
 SAMPLE = """# Suma 1..5 en x2 y la guarda en dmem[0]
@@ -563,8 +563,11 @@ class App:
     def step(self):
         def go():
             self.running = False
-            self.status.set("Step" if self.link.step() else "El CPU esta en halt")
-            self.refresh()
+            if self.link.step():
+                self.status.set("Step")
+                self.refresh()
+            else:
+                self.refresh(halted=True)
         self._guard(go)
 
     def run(self):
@@ -584,8 +587,7 @@ class App:
         def go():
             if self.link.poll_halt(0.0):
                 self.running = False
-                self.status.set("Halt (ebreak/ecall)")
-                self.refresh()
+                self.refresh(halted=True)
             else:
                 self.root.after(100, self._poll)
         self._guard(go)
@@ -594,8 +596,8 @@ class App:
         def go():
             halted = self.link.pause()
             self.running = False
-            self.status.set("Halt" if halted else "Pausado")
-            self.refresh()
+            self.status.set("Pausado")
+            self.refresh(halted=halted)
         self._guard(go)
 
     def reset(self):
@@ -606,13 +608,15 @@ class App:
             self.refresh()
         self._guard(go)
 
-    def refresh(self):
+    def refresh(self, halted=False):
         def go():
             if self.running:
                 self.link.pause()
                 self.running = False
                 self.status.set("Pausado para leer el estado")
             d = decode_dump(self.link.dump())
+            if halted:
+                self.status.set(format_trap(d["trap"]))
             self._show(d)
         self._guard(go)
 

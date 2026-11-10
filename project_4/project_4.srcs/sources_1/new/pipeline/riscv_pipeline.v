@@ -8,8 +8,21 @@
 //  - i_rst    : synchronous reset (PC=0, pipeline emptied, x1..x31 cleared).
 //               dmem is NOT cleared. imem is kept.
 //  - i_enable : 0 freezes every state element (no clock gating).
-//  - o_halt   : level, 1 when an ECALL/EBREAK reaches WB. Everything older has
-//               retired and nothing younger was allowed to execute.
+//  - o_halt   : level, 1 when an instruction that stops execution reaches WB:
+//               ECALL, EBREAK or a fatal trap. Everything older has retired,
+//               the instruction itself wrote nothing, and nothing younger was
+//               allowed to execute. Debug words 86..88 say why (see below).
+//
+// Exceptions (RV32I without the privileged architecture: no CSRs). Every
+// exception is a fatal trap: the CPU halts and the execution environment (the
+// debug unit) reports it. Codes are the standard mcause exception codes:
+//    0 instruction address misaligned (taken jump/branch to pc % 4 != 0)
+//    1 instruction access fault       (fetch outside the imem)
+//    2 illegal instruction            (anything that is not RV32I, incl. CSR*)
+//    3 breakpoint                     (EBREAK)
+//    4 / 6 load / store address misaligned
+//    5 / 7 load / store access fault  (outside the dmem)
+//   11 environment call               (ECALL)
 //  - imem write port: byte-wide, used to load a program.
 //  - debug bus: o_dbg_data = word i_dbg_addr of the map below (combinational).
 //               o_dbg_count = number of words. New words go at the end.
@@ -29,11 +42,14 @@
 //   18 MEM dmem read data
 //   19 MEM/WB ctrl [0]reg_write [1]halt   20 MEM/WB result   21 MEM/WB rd
 //   22..53 x0..x31
-//   54..54+DBG_DMEM_WORDS-1 dmem words
+//   54..85 dmem words 0..31
+//   86 trap cause (code above)   87 trap pc   88 trap value (faulting address)
+//      valid while o_halt = 1
 //////////////////////////////////////////////////////////////////////////////////
 module riscv_pipeline #(
     parameter IMEM_ADDR_W = 10,           // imem size: 2**IMEM_ADDR_W bytes
-    parameter IMEM_INIT   = ""
+    parameter IMEM_INIT   = "",
+    parameter DMEM_DEPTH  = 256           // dmem size in words (simulation uses more)
 ) (
 `ifdef RISCV_FORMAL
     `RVFI_OUTPUTS,                // puertos RVFI: solo para riscv-formal
@@ -54,7 +70,10 @@ module riscv_pipeline #(
     localparam [15:0] DBG_REGS       = 16'd22;
     localparam [15:0] DBG_DMEM       = DBG_REGS + 16'd32;
     localparam [15:0] DBG_DMEM_WORDS = 16'd32;
-    localparam [15:0] DBG_COUNT      = DBG_DMEM + DBG_DMEM_WORDS;
+    localparam [15:0] DBG_TRAP       = DBG_DMEM + DBG_DMEM_WORDS;
+    localparam [15:0] DBG_COUNT      = DBG_TRAP + 16'd3;
+    localparam [32:0] IMEM_BYTES     = 33'd1 << IMEM_ADDR_W;
+    localparam [32:0] DMEM_BYTES     = 33'd4 * DMEM_DEPTH;
 
     wire en  = i_enable;
     wire [15:0] dbg_reg_off  = i_dbg_addr - DBG_REGS;
@@ -64,8 +83,8 @@ module riscv_pipeline #(
     wire rst = i_rst;
 
     // ------------------------------------------------------------ hazard / flush
-    wire        stall, redirect, halting, ex_halt;
-    wire        stop_fetch = ex_halt | halting;     // nothing younger than a halt may run
+    wire        stall, redirect, halting, ex_stop;
+    wire        stop_fetch = ex_stop | halting;     // nothing younger than a halt may run
     wire        flush_if_id_r, flush_id_ex_r;
     wire        flush_if_id = flush_if_id_r | stop_fetch;
     wire        flush_id_ex = flush_id_ex_r | stop_fetch | stall;   // stall -> bubble
@@ -115,6 +134,24 @@ module riscv_pipeline #(
     wire id_is_jalr  = (id_opcode == 7'b1100111);
     wire id_is_auipc = (id_opcode == 7'b0010111);
 
+    // instructions that stop execution, detected in ID: they only take effect
+    // when they reach EX (a younger wrong-path one is flushed like any other)
+    wire id_illegal, id_ecall, id_ebreak;
+    illegal_check u_illegal (
+        .instr(id_inst), .illegal(id_illegal), .ecall(id_ecall), .ebreak(id_ebreak)
+    );
+    wire       id_fetch_fault = ({1'b0, id_pc} >= IMEM_BYTES);
+    wire       id_stop  = id_fetch_fault | id_illegal | id_halt;
+    wire [3:0] id_cause = id_fetch_fault ? 4'd1  :
+                          id_illegal     ? 4'd2  :
+                          id_ebreak      ? 4'd3  : 4'd11;
+    // such an instruction does nothing else
+    wire id_reg_write_q = id_reg_write & ~id_stop;
+    wire id_mem_read_q  = id_mem_read  & ~id_stop;
+    wire id_mem_write_q = id_mem_write & ~id_stop;
+    wire id_branch_q    = id_branch    & ~id_stop;
+    wire id_jump_q      = id_jump      & ~id_stop;
+
     wire [31:0] id_imm;
     immgen u_immgen (.instr(id_inst), .imm_sel(id_imm_sel), .imm(id_imm));
 
@@ -139,16 +176,18 @@ module riscv_pipeline #(
     wire [31:0] ex_pc, ex_pc4, ex_rdata1, ex_rdata2, ex_imm;
     wire [4:0]  ex_rs1, ex_rs2, ex_rd;
     wire [2:0]  ex_funct3;
+    wire [3:0]  ex_cause;
+    wire        ex_halt;
     id_ex_reg u_id_ex (
         .clk(clk), .rst(rst), .en(en), .flush(flush_id_ex),
-        .id_reg_write(id_reg_write), .id_alu_src(id_alu_src),
-        .id_mem_read(id_mem_read), .id_mem_write(id_mem_write),
-        .id_branch(id_branch), .id_jump(id_jump),
-        .id_is_jalr(id_is_jalr), .id_is_auipc(id_is_auipc), .id_halt(id_halt),
+        .id_reg_write(id_reg_write_q), .id_alu_src(id_alu_src),
+        .id_mem_read(id_mem_read_q), .id_mem_write(id_mem_write_q),
+        .id_branch(id_branch_q), .id_jump(id_jump_q),
+        .id_is_jalr(id_is_jalr), .id_is_auipc(id_is_auipc), .id_halt(id_stop),
         .id_wb_sel(id_wb_sel), .id_alu_op(id_alu_op),
         .id_pc(id_pc), .id_pc4(id_pc4), .id_rdata1(id_rdata1), .id_rdata2(id_rdata2),
         .id_imm(id_imm), .id_rs1(id_rs1), .id_rs2(id_rs2), .id_rd(id_rd),
-        .id_funct3(id_funct3),
+        .id_funct3(id_funct3), .id_cause(id_cause),
         .ex_reg_write(ex_reg_write), .ex_alu_src(ex_alu_src),
         .ex_mem_read(ex_mem_read), .ex_mem_write(ex_mem_write),
         .ex_branch(ex_branch), .ex_jump(ex_jump),
@@ -156,7 +195,7 @@ module riscv_pipeline #(
         .ex_wb_sel(ex_wb_sel), .ex_alu_op(ex_alu_op),
         .ex_pc(ex_pc), .ex_pc4(ex_pc4), .ex_rdata1(ex_rdata1), .ex_rdata2(ex_rdata2),
         .ex_imm(ex_imm), .ex_rs1(ex_rs1), .ex_rs2(ex_rs2), .ex_rd(ex_rd),
-        .ex_funct3(ex_funct3)
+        .ex_funct3(ex_funct3), .ex_cause(ex_cause)
     );
 
     hazard_unit u_hazard (
@@ -219,13 +258,41 @@ module riscv_pipeline #(
         .flush_if_id(flush_if_id_r), .flush_id_ex(flush_id_ex_r)
     );
 
-    // halting: sticky from the moment a halt reaches EX, until reset
+    // exceptions detected in EX (misaligned jump target, misaligned or
+    // out-of-range load/store)
+    wire        ex_exc;
+    wire [3:0]  ex_exc_cause;
+    wire [31:0] ex_exc_tval;
+    trap_unit #(.DMEM_BYTES(DMEM_BYTES)) u_trap (
+        .redirect(redirect), .redirect_target(redirect_target),
+        .mem_read(ex_mem_read), .mem_write(ex_mem_write),
+        .funct3(ex_funct3), .addr(alu_out),
+        .exc(ex_exc), .cause(ex_exc_cause), .tval(ex_exc_tval)
+    );
+    // the instruction in EX stops execution (from ID: ecall/ebreak/illegal/fetch
+    // fault; from EX: an exception). It reaches WB writing nothing.
+    assign ex_stop = ex_halt | ex_exc;
+
+    // halting: sticky from the moment a stopping instruction reaches EX, until reset
     reg halting_r;
     always @(posedge clk) begin
         if (rst)               halting_r <= 1'b0;
-        else if (en && ex_halt) halting_r <= 1'b1;
+        else if (en && ex_stop) halting_r <= 1'b1;
     end
     assign halting = halting_r;
+
+    // why it stopped (debug words 86..88)
+    reg [3:0]  trap_cause;
+    reg [31:0] trap_pc, trap_tval;
+    always @(posedge clk) begin
+        if (rst) begin
+            trap_cause <= 4'd0; trap_pc <= 32'd0; trap_tval <= 32'd0;
+        end else if (en && ex_stop && !halting_r) begin
+            trap_cause <= ex_halt ? ex_cause : ex_exc_cause;
+            trap_pc    <= ex_pc;
+            trap_tval  <= ex_halt ? ((ex_cause == 4'd1) ? ex_pc : 32'd0) : ex_exc_tval;
+        end
+    end
 
     // EX/MEM
     wire        mem_mem_read, mem_mem_write, mem_halt;
@@ -234,8 +301,8 @@ module riscv_pipeline #(
     wire [2:0]  mem_funct3;
     ex_mem_reg u_ex_mem (
         .clk(clk), .rst(rst), .en(en),
-        .ex_reg_write(ex_reg_write), .ex_mem_read(ex_mem_read),
-        .ex_mem_write(ex_mem_write), .ex_halt(ex_halt),
+        .ex_reg_write(ex_reg_write & ~ex_exc), .ex_mem_read(ex_mem_read & ~ex_exc),
+        .ex_mem_write(ex_mem_write & ~ex_exc), .ex_halt(ex_stop),
         .ex_wb_sel(ex_wb_sel), .ex_alu_out(alu_out), .ex_rdata2(fwd_b_val),
         .ex_pc4(ex_pc4), .ex_imm(ex_imm), .ex_rd(ex_rd), .ex_funct3(ex_funct3),
         .mem_reg_write(mem_reg_write), .mem_mem_read(mem_mem_read),
@@ -246,7 +313,7 @@ module riscv_pipeline #(
 
     // ------------------------------------------------------------------ MEM
     wire [31:0] mem_rdata, dbg_dmem_data;
-    dmem u_dmem (
+    dmem #(.DEPTH(DMEM_DEPTH)) u_dmem (
         .clk(clk), .we(mem_mem_write & en),
         .addr(mem_alu_out), .wdata(mem_rdata2),
         .funct3(mem_funct3), .rdata(mem_rdata),
@@ -314,8 +381,14 @@ module riscv_pipeline #(
             default: begin
                 if (i_dbg_addr >= DBG_REGS && i_dbg_addr < DBG_DMEM)
                     o_dbg_data = (dbg_reg_idx == 5'd0) ? 32'd0 : dbg_reg_data;
-                else if (i_dbg_addr >= DBG_DMEM && i_dbg_addr < DBG_COUNT)
+                else if (i_dbg_addr >= DBG_DMEM && i_dbg_addr < DBG_TRAP)
                     o_dbg_data = dbg_dmem_data;
+                else if (i_dbg_addr == DBG_TRAP)
+                    o_dbg_data = {28'd0, trap_cause};
+                else if (i_dbg_addr == DBG_TRAP + 16'd1)
+                    o_dbg_data = trap_pc;
+                else if (i_dbg_addr == DBG_TRAP + 16'd2)
+                    o_dbg_data = trap_tval;
                 else
                     o_dbg_data = 32'd0;
             end
@@ -355,15 +428,9 @@ module riscv_pipeline #(
         end
     end
 
-    // ---- EX: próximo PC, operandos usados y "trampas" que este CPU no implementa
+    // ---- EX: próximo PC y si la instrucción detiene la ejecución (trap)
     wire [31:0] f_ex_pc_wdata = redirect ? redirect_target : ex_pc + 32'd4;
-    wire        f_ex_misjump  = redirect && redirect_target[1:0] != 2'b00;
-    wire        f_ex_mismem   = (ex_mem_read || ex_mem_write) &&
-                                ((ex_funct3[1:0] == 2'd2 && alu_out[1:0] != 2'd0) ||
-                                 (ex_funct3[1:0] == 2'd1 && alu_out[0]   != 1'b0));
-    // RV32I exige una excepción en estos casos; este CPU no tiene excepciones,
-    // así que RVFI los marca como 'trap' (ver verif/rvfi/README.md).
-    wire        f_ex_trap     = ex_halt || f_ex_misjump || f_ex_mismem;
+    wire        f_ex_trap     = ex_stop;
 
     // ---- EX/MEM
     reg        f_mem_valid, f_mem_trap;

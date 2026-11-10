@@ -29,13 +29,13 @@ smtbmc bitwuzla
 
 [script]
 read -formal pipeline_props.sv
-read -formal imem_formal.v riscv_pipeline.v control.v immgen.v regfile.v alu.v branch_unit.v dmem.v forward_unit.v hazard_unit.v
+read -formal imem_formal.v riscv_pipeline.v control.v immgen.v regfile.v alu.v branch_unit.v dmem.v forward_unit.v hazard_unit.v illegal_check.v trap_unit.v
 ~mut_flush: read -formal flush_unit.v
 mut_flush:  read -formal flush_unit_mut_flush.v
 ~mut_stall: read -formal pipe_reg.v
 mut_stall:  read -formal pipe_reg_mut_stall.v
 # dmem de 8 palabras en vez de 256: menos estado para el solver.
-chparam -set DEPTH 8 dmem
+chparam -set DMEM_DEPTH 8 riscv_pipeline
 hierarchy -top pipeline_props
 # -norom: sin esto, el case de control.v se vuelve una ROM (estado), que en la
 # inducción arranca con contenido arbitrario.
@@ -78,6 +78,8 @@ pipeline_props.sv
 ../../project_4.srcs/sources_1/new/pipeline/flow/flush_unit.v
 ../../project_4.srcs/sources_1/new/pipeline/flow/forward_unit.v
 ../../project_4.srcs/sources_1/new/pipeline/flow/hazard_unit.v
+../../project_4.srcs/sources_1/new/pipeline/flow/trap_unit.v
+../../project_4.srcs/sources_1/new/pipeline/2_decode/illegal_check.v
 ../../project_4.srcs/sources_1/new/pipeline/regs/pipe_reg.v
 build/mutants/flush_unit_mut_flush.v
 build/mutants/pipe_reg_mut_stall.v

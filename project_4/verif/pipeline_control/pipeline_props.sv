@@ -97,7 +97,8 @@ module pipeline_props (
         end
 
         // T3 — stall (load-use): PC e IF/ID quietos, burbuja en ID/EX.
-        if (past_run && $past(fv_stall)) begin
+        //      (Si a la vez la instrucción de EX se detiene, manda T7.)
+        if (past_run && $past(fv_stall) && !$past(fv_stop_fetch)) begin
             t3_stall_pc:   assert (fv_pc == $past(fv_pc));
             t3_stall_ifid: assert (fv_id_inst == $past(fv_id_inst));
             t3_stall_idex: assert (ex_bubble);
@@ -105,7 +106,8 @@ module pipeline_props (
 
         // T4 — salto tomado en EX: PC = destino, y las DOS instrucciones
         //      que venían detrás se descartan (IF/ID = NOP, ID/EX = burbuja).
-        if (past_run && $past(fv_redirect)) begin
+        //      (Un salto a una dirección no alineada es un trap: manda T7.)
+        if (past_run && $past(fv_redirect) && !$past(fv_stop_fetch)) begin
             t4_redirect_pc:   assert (fv_pc == $past(fv_redirect_target));
             t4_redirect_ifid: assert (fv_id_inst == NOP);
             t4_redirect_idex: assert (ex_bubble);
@@ -114,6 +116,14 @@ module pipeline_props (
         // T5 — halt: una vez en curso, el PC no se mueve más (hasta un reset).
         if (past_run && $past(fv_halting)) begin
             t5_halt_pc: assert (fv_pc == $past(fv_pc));
+        end
+
+        // T7 — la instrucción de EX detiene la ejecución (ecall/ebreak o un
+        //      trap): el PC no avanza y lo más joven se descarta.
+        if (past_run && $past(fv_stop_fetch)) begin
+            t7_stop_pc:   assert (fv_pc == $past(fv_pc));
+            t7_stop_ifid: assert (fv_id_inst == NOP);
+            t7_stop_idex: assert (ex_bubble);
         end
 
         // T6 — nunca hay stall en el ciclo siguiente a un salto tomado
@@ -134,5 +144,7 @@ module pipeline_props (
         c4_redirect_stall: cover ($past(f_past_valid && fv_redirect, 3) && fv_stall);
         // Un congelamiento en medio de un stall (debug unit pausando):
         c5_freeze_stall:   cover (!$past(i_enable) && $past(fv_stall) && !$past(i_rst));
+        // Un load que hace trap mientras su consumidora espera en ID (stall + trap):
+        c6_trap_stall:     cover (past_run && $past(fv_stall) && $past(fv_stop_fetch) && !$past(fv_halting));
     end
 endmodule

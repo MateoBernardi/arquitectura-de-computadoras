@@ -221,3 +221,12 @@ pipeline, ALU, memoria de datos). Ver [verif/README.md](verif/README.md).
 
 `riscv_pipeline.v` tiene un bloque `ifdef RISCV_FORMAL` con la interfaz RVFI que usa
 riscv-formal. Vivado no define esa macro, así que no forma parte del hardware sintetizado.
+
+`sim/` simula el RTL con Verilator y corre la suite oficial **riscv-arch-test** (ACT4),
+autoverificada contra Sail, el modelo de referencia de la ISA. Ver [sim/README.md](sim/README.md).
+
+**Cumplimiento:** el CPU implementa RV32I sin la arquitectura privilegiada (sin CSRs).
+Toda excepción (instrucción ilegal, salto a una dirección no alineada, load/store
+desalineado o fuera de memoria) es un *fatal trap*: el CPU se detiene sin que la
+instrucción escriba nada, y la debug unit muestra la causa y el PC. Resultados:
+riscv-formal 44/44, riscv-arch-test 39/39.

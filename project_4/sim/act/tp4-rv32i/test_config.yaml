@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+name: tp4-rv32i
+compiler_exe: riscv-none-elf-gcc # GCC 15 de xPack en .tools/ (run_act.sh lo agrega al PATH)
+objdump_exe: riscv-none-elf-objdump
+ref_model_exe: sail_riscv_sim # .tools/sail/bin (run_act.sh lo agrega al PATH)
+udb_config: tp4-rv32i.yaml
+linker_script: link.ld
+dut_include_dir: .
+include_priv_tests: False # sin CSRs ni modos de privilegio

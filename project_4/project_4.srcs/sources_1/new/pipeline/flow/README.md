@@ -1,6 +1,6 @@
 # `flow/` — control de flujo entre etapas
 
-Acá están los **3 módulos que cruzan etapas**: ninguno pertenece a una sola, porque
+Acá están los **4 módulos que cruzan etapas**: ninguno pertenece a una sola, porque
 cada uno mira señales de dos o tres etapas distintas.
 
 | módulo | qué lee | qué escribe | etapas que toca |
@@ -8,8 +8,9 @@ cada uno mira señales de dos o tres etapas distintas.
 | `hazard_unit` | `id_rs1/id_rs2` (ID) + `ex_rd`/`ex_mem_read` (EX/MEM) | `stall` | **ID ↔ EX/MEM** |
 | `forward_unit` | `ex_rs1/ex_rs2` (EX) + `mem_rd` (MEM) + `wb_rd` (WB) | `forward_a/forward_b` | **EX ↔ MEM ↔ WB** |
 | `flush_unit` | `redirect` (sale de EX) | `flush_if_id`, `flush_id_ex` | **EX → IF/ID, ID/EX** |
+| `trap_unit` | salto y acceso a memoria de EX | `exc`, `cause`, `tval` | **EX → todo el pipeline** (vía `stop_fetch`) |
 
-Los tres son **combinacionales**.
+Los cuatro son **combinacionales**.
 
 ---
 
@@ -155,10 +156,36 @@ burbujas**. La idea de `project_3` era resolver el JAL en ID para que cueste 1.
 **Efecto en el pipeline** (en `riscv_pipeline.v`)
 
 ```verilog
-wire stop_fetch = ex_halt | halting;
+wire stop_fetch = ex_stop | halting;      // ex_stop = ex_halt | ex_exc
 wire flush_if_id = flush_if_id_r | stop_fetch;
 wire flush_id_ex = flush_id_ex_r | stop_fetch | stall;
 ```
 
-`stop_fetch` hace lo mismo que un flush cuando hay un halt: ninguna instrucción
-posterior puede ejecutarse.
+`stop_fetch` hace lo mismo que un flush cuando la instrucción de EX detiene el CPU
+(ecall, ebreak o un trap): ninguna instrucción posterior puede ejecutarse.
+
+---
+
+## `trap_unit.v` — `trap_unit`
+
+Las excepciones que se detectan en EX, para la instrucción que está en EX. Las de ID
+(ilegal, `ecall`, `ebreak`, fuera de la imem) llegan por `ex_halt`; ver `../README.md`.
+
+| Puerto | Ancho | Descripción |
+|---|---|---|
+| `redirect`, `redirect_target` | 1, 32 | el salto de EX y su destino |
+| `mem_read`, `mem_write` | 1 | load / store |
+| `funct3` | 3 | tamaño del acceso |
+| `addr` | 32 | dirección del load/store (`alu_out`) |
+| `exc` | 1 | hay excepción |
+| `cause` | 4 | código estándar de `mcause` |
+| `tval` | 32 | la dirección que falló |
+| parámetro `DMEM_BYTES` | | tamaño de la dmem: las direcciones válidas son `[0, DMEM_BYTES)` |
+
+| Condición | Causa |
+|---|---|
+| salto tomado con `redirect_target[1:0] ≠ 00` (no hay extensión C) | 0: el trap es **del salto**; el PC nunca queda desalineado |
+| LH/LHU/SH en dirección impar, LW/SW en dirección no múltiplo de 4 | 4 (load) / 6 (store) |
+| load/store con `addr ≥ DMEM_BYTES` | 5 (load) / 7 (store) |
+
+Desalineado tiene prioridad sobre fuera de rango.

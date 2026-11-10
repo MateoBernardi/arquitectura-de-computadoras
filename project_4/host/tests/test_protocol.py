@@ -67,6 +67,20 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual((d["ex"]["stall"], d["ex"]["redirect"], d["ex"]["fwd_a"], d["ex"]["fwd_b"]),
                          (1, 1, "mem", "wb"))
         self.assertEqual(len(d["dmem"]), 32)
+        self.assertIsNone(d["trap"])                 # dump sin las palabras de trap
+
+    def test_decode_trap(self):
+        w = [0] * (dp.DBG_TRAP + 3)
+        w[19] = 0b10                                  # MEM/WB halt
+        w[dp.DBG_TRAP:] = [5, 0x40, 0x800000]         # load fuera de la dmem en pc 0x40
+        d = dp.decode_dump(w)
+        self.assertEqual(len(d["dmem"]), 32)
+        self.assertEqual((d["trap"]["cause"], d["trap"]["pc"], d["trap"]["tval"]), (5, 0x40, 0x800000))
+        self.assertEqual(dp.format_trap(d["trap"]),
+                         "Halt: load fuera de la dmem (causa 5) en pc=0x00000040, dirección 0x00800000")
+        self.assertIn("Halt: load fuera de la dmem", dp.format_dump(w))
+        self.assertEqual(dp.format_trap({"cause": 3, "pc": 8, "tval": 0, "name": "ebreak"}),
+                         "Halt: ebreak (causa 3) en pc=0x00000008")
 
     def test_disasm_roundtrip(self):
         src = open(os.path.join(HERE, "pipeline_test.s")).read()

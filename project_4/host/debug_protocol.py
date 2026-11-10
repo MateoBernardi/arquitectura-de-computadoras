@@ -17,6 +17,21 @@ RSP_OK, RSP_ERR, RSP_HALT, RSP_UNK = b"K", b"E", b"H", b"?"
 
 DBG_REGS = 22
 DBG_DMEM = 54
+DBG_DMEM_WORDS = 32
+DBG_TRAP = DBG_DMEM + DBG_DMEM_WORDS   # causa, pc y valor del trap (3 palabras)
+
+# Por qué se detuvo el CPU: códigos estándar de excepción (mcause). Ver riscv_pipeline.v.
+TRAP_CAUSES = {
+    0: "salto a una dirección no alineada",
+    1: "instrucción fuera de la imem",
+    2: "instrucción ilegal",
+    3: "ebreak",
+    4: "load desalineado",
+    5: "load fuera de la dmem",
+    6: "store desalineado",
+    7: "store fuera de la dmem",
+    11: "ecall",
+}
 
 ABI = ["zero", "ra", "sp", "gp", "tp", "t0", "t1", "t2", "s0", "s1", "a0", "a1", "a2", "a3", "a4",
        "a5", "a6", "a7", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11", "t3", "t4",
@@ -182,8 +197,22 @@ def decode_dump(w):
         },
         "mem_wb": {"reg_write": w[19] & 1, "halt": w[19] >> 1 & 1, "result": w[20], "rd": w[21] & 31},
         "regs": list(w[DBG_REGS:DBG_REGS + 32]),
-        "dmem": list(w[DBG_DMEM:]),
+        "dmem": list(w[DBG_DMEM:DBG_TRAP]),
+        # válido solo con el CPU detenido (None si el bitstream es anterior a los traps)
+        "trap": ({"cause": w[DBG_TRAP], "pc": w[DBG_TRAP + 1], "tval": w[DBG_TRAP + 2],
+                  "name": TRAP_CAUSES.get(w[DBG_TRAP], "?")}
+                 if len(w) >= DBG_TRAP + 3 else None),
     }
+
+
+def format_trap(t):
+    """Texto de la causa de detención (t = decode_dump(...)["trap"])."""
+    if t is None:
+        return "Halt"
+    text = f"Halt: {t['name']} (causa {t['cause']}) en pc=0x{t['pc']:08x}"
+    if t["cause"] in (0, 1, 4, 5, 6, 7):
+        text += f", dirección 0x{t['tval']:08x}"
+    return text
 
 
 def _s(v, bits):
@@ -229,8 +258,12 @@ def disasm(w, pc=0):
         return f"jal {x(rd)},0x{(pc + imm) & 0xFFFFFFFF:x}"
     if op == 0x67:
         return f"jalr {x(rd)},{_s(w >> 20, 12)}({x(rs1)})"
-    if op == 0x73:
-        return "ebreak" if w >> 20 & 1 else "ecall"
+    if w == 0x00000073:
+        return "ecall"
+    if w == 0x00100073:
+        return "ebreak"
+    if op == 0x0F and f3 == 0:
+        return "fence"
     return "<ilegal>"
 
 
@@ -255,7 +288,10 @@ def format_stages(d):
 def format_dump(words):
     """Texto legible del dump completo (para la CLI)."""
     d = decode_dump(words)
-    out = [format_stages(d), "Registros"]
+    out = [format_stages(d)]
+    if d["mem_wb"]["halt"]:
+        out.append(format_trap(d["trap"]))
+    out.append("Registros")
     for r in range(0, 32, 4):
         out.append("       " + "   ".join(f"x{r + k:<2}=0x{d['regs'][r + k]:08x}" for k in range(4)))
     if d["dmem"]:

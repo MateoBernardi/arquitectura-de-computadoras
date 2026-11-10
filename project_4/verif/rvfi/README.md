@@ -8,6 +8,7 @@ verificar formalmente procesadores RISC-V. Cada chequeo es un BMC desde el reset
 ./run.sh                      # checks.cfg: el diseño actual, contra el estándar completo
 ./run.sh nostall              # nostall.cfg: variante sin stall de load-use
 ./run.sh checks reg_ch0       # un solo chequeo
+./mutants.sh                  # mutantes de los traps: cada uno tiene que FALLAR
 ```
 
 Los resultados quedan en `.tools/riscv-formal/cores/tp4/<config>/<chequeo>/`. Los
@@ -24,7 +25,10 @@ contraejemplos están en `engine_0/trace.vcd`.
    - las instrucciones son **arbitrarias** en cada lectura (`imem_anyseq.v`);
    - `i_enable` es libre (la debug unit puede pausar en cualquier ciclo), pero vale 0
      durante el reset, que es el contrato de la debug unit.
-3. **`checks.cfg`** elige los chequeos y sus profundidades. `genchecks.py` genera un `.sby` por
+3. **`pma.sv`** es el mapa de memoria (`RISCV_FORMAL_PMA_MAP`): qué direcciones se pueden
+   ejecutar (la imem) y leer o escribir (la dmem). Un acceso fuera de ese mapa tiene que
+   generar un trap, sin escribir nada.
+4. **`checks.cfg`** elige los chequeos y sus profundidades. `genchecks.py` genera un `.sby` por
    chequeo dentro de `.tools/riscv-formal/cores/tp4/`, la carpeta que `run.sh` arma con
    enlaces a estos archivos.
 
@@ -40,6 +44,10 @@ contraejemplos están en `engine_0/trace.vcd`.
 | `cover` | ¿se retiran instrucciones? (que lo anterior no sea vacío) |
 | `ill` | ¿una instrucción ilegal genera una excepción? |
 
+En los `insn_*`, una instrucción que según la spec genera una excepción (salto a una
+dirección no alineada, load/store desalineado, acceso fuera del mapa de memoria) tiene que
+retirarse con `trap = 1`, sin escribir registros ni memoria.
+
 ## Configuraciones
 
 | Archivo | Qué cambia |
@@ -47,15 +55,30 @@ contraejemplos están en `engine_0/trace.vcd`.
 | `checks.cfg` | el diseño actual, **sin suposiciones** |
 | `nostall.cfg` | `hazard_unit` → `../variants/hazard_unit_nostall.v` (nunca frena) |
 
-## Resultado actual (`checks.cfg`): 36 PASS, 8 FAIL
+**`nostall.cfg`: 44/44 PASS.** El stall de load-use **no hace falta** en este CPU. La dmem
+se lee de forma combinacional en MEM, así que el dato del load ya está en el ciclo en que
+la instrucción siguiente está en EX, y el forwarding MEM→EX lo entrega. El costo es de
+timing: lectura de dmem → mux de forwarding → ALU en un mismo ciclo. Eso lo mide Vivado.
 
-| Falla | Causa |
-|---|---|
-| `insn_beq/bne/blt/bge/bltu/bgeu` | un salto a una dirección no alineada no genera una excepción: el CPU sigue ejecutando con un PC desalineado |
-| `reg` | un load/store desalineado no genera una excepción y escribe `rd`; las instrucciones con codificación inválida se ejecutan como si fueran otra |
-| `ill` | una instrucción ilegal no genera una excepción |
+## Resultado (`checks.cfg`): 44/44 PASS
 
-Se corrigen con *fatal traps* (ver `../README.md`, "Plan").
+Todos los chequeos pasan, **sin suposiciones** sobre el programa: el solver elige
+cualquier instrucción en cada ciclo, incluidas las ilegales, los saltos a direcciones no
+alineadas y los accesos fuera de memoria. Corre en unos 10 minutos con 8 hilos.
+
+Antes de implementar los traps, el resultado era 36 PASS y 8 FAIL: los 6 branches (un
+salto a una dirección no alineada no generaba una excepción), `reg` (un load desalineado
+escribía `rd`, y las codificaciones inválidas se ejecutaban) e `ill`.
+
+## Mutantes (`mutants.sh`)
+
+| Mutante | Error inyectado | Lo detecta |
+|---|---|---|
+| `no_dmem_range` | sin chequeo de rango de la dmem | `insn_lw` |
+| `no_imem_range` | sin chequeo de rango de la imem | `insn_addi` |
+| `no_misjump` | un salto a una dirección no alineada no es un trap | `insn_beq` |
+| `writes_on_trap` | la instrucción que hace trap escribe `rd` | `insn_lw` |
+| `no_illegal` | los opcodes desconocidos son legales | `ill` |
 
 ## Fuera del alcance de riscv-formal
 

@@ -35,7 +35,7 @@ Es **combinacional**, no tiene registros.
 | `mem_write` | 1 | es un store |
 | `branch` | 1 | es un branch condicional |
 | `jump` | 1 | es JAL o JALR |
-| `halt` | 1 | ECALL / EBREAK (cualquier `SYSTEM`) → frena el CPU |
+| `halt` | 1 | opcode `SYSTEM` → frena el CPU (qué instrucción es, y si es legal, lo dice `illegal_check`) |
 | `wb_sel` | 2 | qué valor se escribe: `00`=ALU, `01`=MEM, `10`=PC+4, `11`=Uimm |
 | `alu_op` | 4 | código de operación de la ALU (ver `alu_ops.vh`) |
 | `imm_sel` | 3 | formato del inmediato: `000`=I, `001`=S, `010`=B, `011`=U, `100`=J |
@@ -57,6 +57,38 @@ Es **combinacional**, no tiene registros.
 
 > `alu_ops.vh` vive en `3_execute/`, pero `control.v` lo incluye igual para tener
 > los mismos códigos de operación.
+
+---
+
+## `illegal_check.v` — `illegal_check`
+
+Decide si la instrucción es **una de las 40 de RV32I**. Combinacional. Mira la
+instrucción completa, no solo `opcode`/`funct3`/`funct7`: `ecall` y `ebreak` tienen una
+única codificación válida.
+
+| Puerto | Ancho | Descripción |
+|---|---|---|
+| `instr` | 32 | la instrucción (`id_inst`) |
+| `illegal` | 1 | no es RV32I → trap "instrucción ilegal" (causa 2) |
+| `ecall` | 1 | es exactamente `ecall` (`0x00000073`) |
+| `ebreak` | 1 | es exactamente `ebreak` (`0x00100073`) |
+
+| Opcode | Legal si |
+|---|---|
+| LUI, AUIPC, JAL | siempre |
+| JALR | `funct3 = 000` |
+| BRANCH | `funct3` ≠ `010`, `011` |
+| LOAD | `funct3` ∈ {LB, LH, LW, LBU, LHU} |
+| STORE | `funct3` ∈ {SB, SH, SW} |
+| OP-IMM | SLLI: `funct7 = 0000000`; SRLI/SRAI: `funct7` = `0000000` o `0100000` |
+| OP | `funct7 = 0000000`, o `0100000` para SUB y SRA |
+| MISC-MEM | `funct3 = 000` (FENCE; el resto de los campos se ignora, como pide la spec) |
+| SYSTEM | solo `ecall` y `ebreak` (no hay Zicsr: `csr*` es ilegal) |
+| cualquier otro (incluye `instr[1:0] ≠ 11`, es decir, instrucciones comprimidas) | nunca |
+
+En `riscv_pipeline.v`, una instrucción ilegal, `ecall`, `ebreak` o una instrucción
+traída desde fuera de la imem tiene anuladas `reg_write`, `mem_read`, `mem_write`,
+`branch` y `jump`, y entra a ID/EX con `halt = 1` y su causa.
 
 ---
 

@@ -5,6 +5,8 @@
 //  - en  : 0 = the CPU is paused by the debug unit; the register holds its value
 //          (flush and stall are ignored while paused).
 //  - halt travels with the instruction down to WB, where it stops the CPU.
+//    It marks an instruction that stops execution: ecall/ebreak or a fatal
+//    trap. In ID/EX, cause says why (the standard mcause exception code).
 //////////////////////////////////////////////////////////////////////////////////
 
 module if_id_reg (
@@ -41,6 +43,7 @@ module id_ex_reg (
     input [31:0] id_pc, id_pc4, id_rdata1, id_rdata2, id_imm,
     input [4:0]  id_rs1, id_rs2, id_rd,
     input [2:0]  id_funct3,
+    input [3:0]  id_cause,
     // Outputs
     output reg        ex_reg_write, ex_alu_src, ex_mem_read, ex_mem_write,
     output reg        ex_branch, ex_jump, ex_is_jalr, ex_is_auipc, ex_halt,
@@ -48,7 +51,8 @@ module id_ex_reg (
     output reg [3:0]  ex_alu_op,
     output reg [31:0] ex_pc, ex_pc4, ex_rdata1, ex_rdata2, ex_imm,
     output reg [4:0]  ex_rs1, ex_rs2, ex_rd,
-    output reg [2:0]  ex_funct3
+    output reg [2:0]  ex_funct3,
+    output reg [3:0]  ex_cause
 );
     always @(posedge clk) begin
         if (rst || (en && flush)) begin
@@ -58,7 +62,7 @@ module id_ex_reg (
             ex_is_jalr <= 0; ex_is_auipc <= 0; ex_halt <= 0;
             ex_wb_sel <= 0; ex_alu_op <= 0;
             ex_pc <= 0; ex_pc4 <= 0; ex_rdata1 <= 0; ex_rdata2 <= 0; ex_imm <= 0;
-            ex_rs1 <= 0; ex_rs2 <= 0; ex_rd <= 0; ex_funct3 <= 0;
+            ex_rs1 <= 0; ex_rs2 <= 0; ex_rd <= 0; ex_funct3 <= 0; ex_cause <= 0;
         end else if (en) begin
             ex_reg_write <= id_reg_write; ex_alu_src   <= id_alu_src;
             ex_mem_read  <= id_mem_read;  ex_mem_write <= id_mem_write;
@@ -70,6 +74,7 @@ module id_ex_reg (
             ex_rdata1   <= id_rdata1; ex_rdata2 <= id_rdata2; ex_imm <= id_imm;
             ex_rs1      <= id_rs1;    ex_rs2    <= id_rs2;
             ex_rd       <= id_rd;     ex_funct3 <= id_funct3;
+            ex_cause    <= id_cause;
         end
     end
 endmodule

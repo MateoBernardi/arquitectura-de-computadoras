@@ -46,7 +46,8 @@ El más grande: lleva **todo** lo que calculó la etapa ID.
 `id_alu_op[3:0]`
 
 **Datos:** `id_pc`, `id_pc4`, `id_rdata1`, `id_rdata2`, `id_imm`, `id_rs1[4:0]`,
-`id_rs2[4:0]`, `id_rd[4:0]`, `id_funct3[2:0]`
+`id_rs2[4:0]`, `id_rd[4:0]`, `id_funct3[2:0]`, `id_cause[3:0]` (por qué se detiene,
+si `id_halt = 1`)
 
 **Salidas:** los mismos, con prefijo `ex_`.
 

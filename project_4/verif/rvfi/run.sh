@@ -15,7 +15,7 @@ RF=$(cd ../../../.tools 2>/dev/null && pwd)/riscv-formal
 # directorio real, así que ahí armamos una carpeta con enlaces a estos archivos.
 CORE="$RF/cores/tp4"
 mkdir -p "$CORE"
-for f in *.cfg wrapper.sv imem_anyseq.v; do ln -sfn "$HERE/$f" "$CORE/$f"; done
+for f in *.cfg wrapper.sv imem_anyseq.v pma.sv; do ln -sfn "$HERE/$f" "$CORE/$f"; done
 (cd "$CORE" && python3 ../../checks/genchecks.py "$CFG") || exit 1
 
 targets=()
