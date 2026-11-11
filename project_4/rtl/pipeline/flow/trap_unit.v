@@ -20,6 +20,7 @@ module trap_unit #(
     input  wire [2:0]  funct3,             // access size: [1:0] = 00 byte, 01 half, 10 word
     input  wire [31:0] addr,               // load/store address (alu_out)
     output wire        exc,
+    output wire        exc_mem,            // only the load/store part of exc
     output reg  [3:0]  cause,
     output reg  [31:0] tval                // faulting address
 );
@@ -32,7 +33,8 @@ module trap_unit #(
                                   (funct3[1:0] == 2'b01 && addr[0]   != 1'b0));
     wire mem_fault      = mem && ({1'b0, addr} >= DMEM_BYTES);
 
-    assign exc = pc_misaligned || mem_misaligned || mem_fault;
+    assign exc_mem = mem_misaligned || mem_fault;
+    assign exc     = pc_misaligned || exc_mem;
 
     always @(*) begin
         if (pc_misaligned) begin

@@ -87,8 +87,7 @@ module riscv_pipeline #(
     wire        stall, redirect, halting, ex_stop;
     wire        stop_fetch = ex_stop | halting;     // nothing younger than a halt may run
     wire        flush_if_id_r, flush_id_ex_r;
-    wire        flush_if_id = flush_if_id_r | stop_fetch;
-    wire        flush_id_ex = flush_id_ex_r | stop_fetch | stall;   // stall -> bubble
+    wire        flush_if_id, flush_id_ex;     // see below, after trap_unit
 
     // ------------------------------------------------------------------- IF
     reg  [31:0] pc;
@@ -261,18 +260,27 @@ module riscv_pipeline #(
 
     // exceptions detected in EX (misaligned jump target, misaligned or
     // out-of-range load/store)
-    wire        ex_exc;
+    wire        ex_exc, ex_exc_mem;
     wire [3:0]  ex_exc_cause;
     wire [31:0] ex_exc_tval;
     trap_unit #(.DMEM_BYTES(DMEM_BYTES)) u_trap (
         .redirect(redirect), .redirect_target(redirect_target),
         .mem_read(ex_mem_read), .mem_write(ex_mem_write),
         .funct3(ex_funct3), .addr(alu_out),
-        .exc(ex_exc), .cause(ex_exc_cause), .tval(ex_exc_tval)
+        .exc(ex_exc), .exc_mem(ex_exc_mem), .cause(ex_exc_cause), .tval(ex_exc_tval)
     );
     // the instruction in EX stops execution (from ID: ecall/ebreak/illegal/fetch
     // fault; from EX: an exception). It reaches WB writing nothing.
     assign ex_stop = ex_halt | ex_exc;
+
+    // Flushes: IF/ID and ID/EX are emptied on a redirect and when something stops
+    // execution (nothing younger than a halt may run); ID/EX also on a stall (bubble).
+    // That is flush_*_r | stop_fetch, written without the misaligned-jump part of
+    // ex_exc: it only happens on a redirect, which already flushes both. Same logic,
+    // but the flush does not wait for the misaligned check (it was on the critical
+    // path: ALU -> branch decision -> misaligned check -> flush -> reset of ID/EX).
+    assign flush_if_id = flush_if_id_r | ex_halt | ex_exc_mem | halting;
+    assign flush_id_ex = flush_id_ex_r | ex_halt | ex_exc_mem | halting | stall;
 
     // halting: sticky from the moment a stopping instruction reaches EX, until reset
     reg halting_r;

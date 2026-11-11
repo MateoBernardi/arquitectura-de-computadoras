@@ -72,6 +72,32 @@ divisor 10).
 El camino crítico a 70 MHz y el análisis completo de timing están en
 [`../../RESULTADOS.md`](../../RESULTADOS.md).
 
+### Estrategia y robustez
+
+Que una implementación cierre no alcanza: cada cambio en el diseño, aunque sea el valor de
+`BUILD_ID`, produce otra ubicación y otro ruteo, y a 70 MHz el margen queda en décimas de
+ns. Se implementó el diseño varias veces, con distintos `BUILD_ID` (que es como cambiar la
+semilla):
+
+| Diseño | Estrategia | WNS en cada ubicación (ns) |
+|---|---|---|
+| load desde WB | por defecto | +0,077, **−0,586** |
+| load desde WB | `Performance_ExplorePostRoutePhysOpt` | +0,010, +0,104, +0,109 |
+| load desde WB + flush sin esperar el chequeo de salto desalineado | `Performance_ExplorePostRoutePhysOpt` | +0,014, +0,197 |
+
+Por eso `impl.tcl` usa **`Performance_ExplorePostRoutePhysOpt`**: más esfuerzo de
+ubicación, replica los registros con mucho fanout y optimiza después del ruteo. La
+implementación tarda un poco más (unos 4 minutos), y con la estrategia por defecto una de
+dos ubicaciones fallaba. Se cambia con `TP4_IMPL_STRATEGY`.
+
+El flush reescrito (ver `rtl/pipeline/riscv_pipeline.v`) es la misma lógica, escrita para
+que no espere a la detección de un salto a una dirección desalineada: ese caso siempre
+viene con un redirect, que ya vacía IF/ID e ID/EX. Saca 4 niveles de lógica del camino
+crítico (de 17 a 13). Lo que queda es, sobre todo, ruteo: el 80 % del retardo.
+
+Si una implementación no cierra, la capa `implementacion` falla: nunca se programa la placa
+con un bitstream que no pasó el STA.
+
 ### Historia: de 50 a 70 MHz
 
 El diseño anterior adelantaba a EX, desde MEM, el dato leído de la dmem. Su barrido dio:

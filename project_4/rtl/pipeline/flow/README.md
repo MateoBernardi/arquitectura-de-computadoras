@@ -86,7 +86,10 @@ redirect 1 ──▶│                      │──▶ flush_if_id 1  C
 
 Hoy las dos salidas son `redirect`: el módulo deja explícita la decisión y el lugar donde
 cambiarla. El pipeline les suma los otros motivos para vaciar esas etapas: el stall
-(burbuja en ID/EX) y el CPU deteniéndose (nada posterior se ejecuta).
+(burbuja en ID/EX) y el CPU deteniéndose (nada posterior se ejecuta). Para eso usa
+`exc_mem` y no `exc`: la otra excepción, la del salto desalineado, siempre viene con un
+redirect, y así el flush no espera a esa comprobación, que estaba en el camino crítico
+(ver `verif/fpga/README.md`, "Estrategia y robustez").
 
 ## `trap_unit` — excepciones de EX
 
@@ -96,10 +99,10 @@ con la instrucción.
 
 ```
                       ┌──────────────────────┐
-redirect         1 ──▶│                      │──▶ exc    1  C
-redirect_target 32 ──▶│                      │──▶ cause  4  C
-mem_read         1 ──▶│      trap_unit       │──▶ tval  32  C
-mem_write        1 ──▶│   [combinacional]    │
+redirect         1 ──▶│                      │──▶ exc     1  C
+redirect_target 32 ──▶│                      │──▶ exc_mem 1  C
+mem_read         1 ──▶│      trap_unit       │──▶ cause   4  C
+mem_write        1 ──▶│   [combinacional]    │──▶ tval   32  C
 funct3           3 ──▶│                      │
 addr            32 ──▶│                      │
                       └──────────────────────┘
@@ -112,6 +115,7 @@ addr            32 ──▶│                      │
 | dirección fuera de la dmem | 5 (load) / 7 (store) |
 
 Desalineado tiene prioridad sobre fuera de rango. `tval` es la dirección que falló.
+`exc_mem` es la parte de `exc` que viene del load o store (las dos últimas filas).
 
 | Parámetro | En el sistema | Para qué |
 |---|---|---|
