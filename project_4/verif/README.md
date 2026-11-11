@@ -19,8 +19,9 @@ Si una herramienta no está en `TOOLS_DIR`, se usa la del sistema.
 ## Cómo se corre
 
 ```bash
-./run.sh                           # todas las capas (~25 min; riscv-formal es la más larga)
-./run.sh rapido                    # todo menos riscv-formal (~6 min)
+./run.sh                           # todas las capas (~35 min)
+./run.sh rapido                    # todo menos riscv-formal y Vivado (~6 min)
+./run.sh fpga                      # síntesis e implementación (~10 min, necesita Vivado)
 ./run.sh act traps                 # solo algunas capas
 ./run.sh --variante hazard_unit_nostall rvfi act traps    # una variante
 ./run.sh --lista                   # capas, grupos y herramientas
@@ -49,6 +50,11 @@ y las versiones de las herramientas. Todo lo generado va a `build/`.
 | `rendimiento` | ciclos y CPI del diseño base y de cada variante; cada variante tiene que dar el mismo resultado |
 | `sistema` | el sistema completo (UART + debug unit + CPU), manejado por la línea serie |
 | `host` | el software de la PC: protocolo, desensamblador y GUI |
+| `sintesis` | Vivado: el netlist es lo que pide el RTL (avisos justificados, sin latches, memorias), con mutantes |
+| `implementacion` | Vivado: STA completo (nada sin restringir; setup, hold, pulso), cruces de reloj, ruteo, DRC |
+
+Las capas de FPGA, y por qué no hay simulación de netlist ni capa de bitstream, están en
+[`fpga/README.md`](fpga/README.md).
 
 ## Qué se verifica
 
@@ -128,7 +134,7 @@ verif/
 │                         datapath/ rvfi/ (riscv-formal) y common/imem_formal.v
 ├── sim/                  simulación con Verilator: ACT, traps, rendimiento
 ├── system/               el sistema completo (UART + debug unit + CPU), con Icarus
-├── fpga/                 Vivado: crear el proyecto, síntesis, implementación y bitstream
+├── fpga/                 Vivado: crear el proyecto, síntesis, implementación, frecuencia máxima
 └── variants/             módulos alternativos para evaluar ideas
 ```
 

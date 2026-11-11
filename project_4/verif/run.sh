@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Verificación del proyecto por capas, en el orden del flujo:
-#   RTL (formal, rvfi, act, traps, rendimiento) → sistema → host
+#   RTL (formal, rvfi, act, traps, rendimiento) → sistema → host → síntesis → implementación
 #
 #   ./run.sh                     todas las capas
 #   ./run.sh act traps           solo esas capas
@@ -30,11 +30,14 @@ LAYERS=(
 "rendimiento|ciclos y CPI del diseño base y cada variante; cada variante debe dar el mismo resultado|cmd:verilator cmd:riscv-none-elf-gcc dir:riscv-formal"
 "sistema|el sistema completo (UART + debug unit + CPU) manejado por la línea serie|cmd:iverilog cmd:vvp"
 "host|el software de la PC: protocolo UART, desensamblador y GUI|cmd:python3 py:tkinter"
+"sintesis|Vivado: el netlist es lo que pide el RTL (avisos justificados, sin latches, memorias), con mutantes|cmd:vivado"
+"implementacion|Vivado: STA completo (nada sin restringir; setup, hold, pulso), cruces de reloj, ruteo, DRC|cmd:vivado"
 )
 declare -A LAYER_GROUPS=(
-    [todo]="formal rvfi act traps rendimiento sistema host"
+    [todo]="formal rvfi act traps rendimiento sistema host sintesis implementacion"
     [rtl]="formal rvfi act traps rendimiento"
     [rapido]="formal act traps rendimiento sistema host"
+    [fpga]="sintesis implementacion"
 )
 
 layer_field() {   # layer_field <capa> <n>
@@ -77,17 +80,47 @@ run_rendimiento() { sim/bench.py; }
 run_sistema()     { system/run.sh; }
 run_host()        { python3 tools/pyunit.py "$PROJ/host/tests"; }
 
+# Versión del RTL que va al dump: el commit, si rtl/ y constraints/ no tienen cambios sin
+# commitear; si no, 0 ("sin versión"), para no atribuirle a un commit un RTL que no es el suyo.
+build_id() {
+    if [ -z "$(git -C "$PROJ" status --porcelain -- rtl constraints 2>/dev/null)" ]; then
+        git -C "$PROJ" rev-parse --short=8 HEAD
+    else echo 0; fi
+}
+vivado_batch() {   # vivado_batch <script.tcl> <log>
+    (cd "$PROJ/build/vivado" && vivado -mode batch -nojournal -log "$2" -source "$1" > /dev/null)
+}
+run_sintesis() {
+    export TP4_BUILD_ID; TP4_BUILD_ID=$(build_id)
+    echo "BUILD_ID = $TP4_BUILD_ID"
+    mkdir -p "$PROJ/build/vivado"
+    vivado_batch "$PWD/fpga/create_project.tcl" "$REPORTS/vivado_proyecto.log" || return 1
+    vivado_batch "$PWD/fpga/synth.tcl" "$REPORTS/vivado_sintesis.log" || return 1
+    cp "$PROJ/build/vivado/tp4.runs/synth_1/runme.log" "$REPORTS/sintesis_vivado.log"
+    local rc=0
+    python3 fpga/check_synth.py "$REPORTS/sintesis_vivado.log" "$RTL_DIR" fpga/waivers.txt || rc=1
+    echo "== mutantes (cada uno tiene que ser detectado)"
+    fpga/synth_mutants.sh || rc=1
+    return $rc
+}
+run_implementacion() {
+    [ -f "$PROJ/build/vivado/tp4.xpr" ] || { echo "no hay proyecto: correr antes la capa sintesis"; return 1; }
+    local rep="$REPORTS/implementacion"; rm -rf "$rep"
+    TP4_REPORT_DIR="$rep" vivado_batch "$PWD/fpga/impl.tcl" "$REPORTS/vivado_implementacion.log" || return 1
+    python3 fpga/check_impl.py "$PROJ/build/vivado/tp4.runs/impl_1/runme.log" "$rep" fpga/waivers.txt
+}
+
 # --- argumentos ---------------------------------------------------------------------
 list_layers() {
     local l name miss
     printf 'TOOLS_DIR = %s\n\n' "$TOOLS_DIR"
     for l in "${LAYERS[@]}"; do
         name=${l%%|*}; miss=$(missing_tools "$name")
-        printf '%-12s %s\n' "$name" "$(echo "$l" | cut -d'|' -f2)"
-        if [ -n "$miss" ]; then printf '%-12s   falta: %s\n' "" "$miss"; else printf '%-12s   herramientas: ok\n' ""; fi
+        printf '%-15s %s\n' "$name" "$(echo "$l" | cut -d'|' -f2)"
+        if [ -n "$miss" ]; then printf '%-15s   falta: %s\n' "" "$miss"; else printf '%-15s   herramientas: ok\n' ""; fi
     done
     printf '\nGrupos:\n'
-    for g in todo rtl rapido; do printf '  %-8s %s\n' "$g" "${LAYER_GROUPS[$g]}"; done
+    for g in todo rtl rapido fpga; do printf '  %-8s %s\n' "$g" "${LAYER_GROUPS[$g]}"; done
     printf '\nPara instalar las herramientas: tools/install.sh (ver verif/README.md).\n'
 }
 
@@ -121,7 +154,7 @@ for layer in "${SELECTED[@]}"; do
         RESULT[$layer]=SKIP; DETAIL[$layer]="falta: $miss"; TIME[$layer]=0
         echo "falta: $miss" > "$log"
     else
-        [ -t 1 ] && printf '%-12s ...\r' "$layer"
+        [ -t 1 ] && printf '%-15s ...\r' "$layer"
         t0=$SECONDS
         "run_$layer" > "$log" 2>&1; rc=$?
         TIME[$layer]=$((SECONDS - t0))
@@ -140,10 +173,10 @@ for layer in "${SELECTED[@]}"; do
         FAIL) STATUS=1 ;;
         SKIP) [ $STATUS -eq 0 ] && STATUS=2 ;;
     esac
-    printf '%-12s %-4s  %-40s %5ss\n' "$layer" "${RESULT[$layer]}" "${DETAIL[$layer]}" "${TIME[$layer]}"
+    printf '%-15s %-4s  %-40s %5ss\n' "$layer" "${RESULT[$layer]}" "${DETAIL[$layer]}" "${TIME[$layer]}"
     if [ "${RESULT[$layer]}" = FAIL ]; then
-        grep '^\[MAL\]' "$log" | head -5 | sed 's/^/             /'
-        printf '             log: %s\n' "$log"
+        grep '^\[MAL\]' "$log" | head -5 | sed 's/^/                /'
+        printf '                log: %s\n' "$log"
     fi
 done
 

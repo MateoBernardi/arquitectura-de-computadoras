@@ -1,0 +1,18 @@
+# Avisos de Vivado que son lo que pide el RTL. check_synth.py falla con cualquier aviso
+# que no esté acá, y con cualquier renglón de acá que ya no corresponda a ningún aviso.
+#
+# Formato:  <ID de Vivado o MEM> | <expresión regular sobre el mensaje> | <por qué>
+# MEM: un arreglo del RTL (módulo.nombre) que no se implementa como RAM.
+
+Synth 8-7080 | Parallel synthesis criteria is not met | aviso sobre el rendimiento de la herramienta, no sobre el diseño
+Synth 8-7129 | Port addr\[\d+\] in module imem | la imem tiene 2^IMEM_ADDR_W bytes: usa addr[IMEM_ADDR_W-1:2]; el resto lo mira id_fetch_fault (fetch fuera de la imem)
+Synth 8-7129 | Port addr\[\d+\] in module dmem | la dmem usa solo los bits de su tamaño; las direcciones fuera de rango las detecta trap_unit (access fault)
+Synth 8-7129 | Port funct7\[\d\] in module control | control solo necesita funct7[5] (SUB/SRA); que el resto sea válido lo decide illegal_check
+Synth 8-7129 | Port id_opcode\[\d\] in module hazard_unit | la política base no usa el opcode; el puerto existe para las variantes (verif/variants/)
+Synth 8-7129 | Port instr\[\d+\] in module immgen | el inmediato solo usa los campos de inmediato de la instrucción, no opcode/rd/funct3
+Synth 8-7129 | Port funct3\[2\] in module trap_unit | para la alineación importa el tamaño del acceso (funct3[1:0]), no el signo
+
+MEM | regfile.regs | el RTL borra los 32 registros en un mismo ciclo (reset); una RAM no puede, así que van en flip-flops
+
+# Implementación (reglas de report_drc y report_methodology)
+SYNTH-5 | distributed LUT RAM | el RTL lee la imem y la dmem de forma asíncrona; una BRAM solo lee de forma sincrónica, así que van en RAM distribuida

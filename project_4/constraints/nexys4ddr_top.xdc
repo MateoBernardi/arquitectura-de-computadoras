@@ -23,3 +23,15 @@ set_property -dict { PACKAGE_PIN D4  IOSTANDARD LVCMOS33 } [get_ports { o_tx }];
 set_property -dict { PACKAGE_PIN H17 IOSTANDARD LVCMOS33 } [get_ports { o_led[0] }];
 set_property -dict { PACKAGE_PIN K15 IOSTANDARD LVCMOS33 } [get_ports { o_led[1] }];
 set_property -dict { PACKAGE_PIN J13 IOSTANDARD LVCMOS33 } [get_ports { o_led[2] }];
+
+## Configuración del banco 0 (la del XDC maestro de Digilent para la Nexys4 DDR)
+set_property CFGBVS VCCO [current_design]
+set_property CONFIG_VOLTAGE 3.3 [current_design]
+
+## Puertos asíncronos: no tienen relación de fase con el reloj, así que no se les da un
+## retardo de entrada/salida sino que se excluyen del análisis de timing. El RTL los trata así:
+## - i_rx e i_reset entran por un sincronizador sync_2ff (flip-flops con ASYNC_REG);
+## - o_tx sale de un registro (uart_tx_regs) y la UART es asíncrona: un bit dura ~52 us;
+## - los LED los mira una persona.
+set_false_path -from [get_ports { i_rx i_reset }]
+set_false_path -to   [get_ports { o_tx o_led[*] }]
