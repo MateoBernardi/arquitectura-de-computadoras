@@ -9,6 +9,7 @@ Corre el RTL real (`riscv_pipeline` y todos sus módulos, sin cambios) con
 ./run_traps.sh          # tests dirigidos de excepciones
 ./bench.py              # tabla de rendimiento: diseño base contra cada variante
 ./run_elf.sh prog.elf   # un programa cualquiera
+./build.sh placa        # con las memorias de la placa (1 KB), para comparar contra el hardware
 ```
 
 `VARIANT=<nombre>` antes de `run_act.sh`, `run_traps.sh` o `run_elf.sh` usa el simulador

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Verificación del proyecto por capas, en el orden del flujo:
 #   RTL (formal, rvfi, act, traps, rendimiento) → sistema → host → síntesis → implementación
+#   → placa (la FPGA tiene que estar programada con el bitstream del commit que se prueba)
 #
 #   ./run.sh                     todas las capas
 #   ./run.sh act traps           solo esas capas
@@ -32,12 +33,13 @@ LAYERS=(
 "host|el software de la PC: protocolo UART, desensamblador y GUI|cmd:python3 py:tkinter"
 "sintesis|Vivado: el netlist es lo que pide el RTL (avisos justificados, sin latches, memorias), con mutantes|cmd:vivado"
 "implementacion|Vivado: STA completo (nada sin restringir; setup, hold, pulso), cruces de reloj, ruteo, DRC|cmd:vivado"
+"placa|la FPGA real por la UART: versión, programas y traps comparados contra la simulación, comandos|cmd:verilator cmd:riscv-none-elf-gcc dir:riscv-formal py:serial dev:placa"
 )
 declare -A LAYER_GROUPS=(
-    [todo]="formal rvfi act traps rendimiento sistema host sintesis implementacion"
+    [todo]="formal rvfi act traps rendimiento sistema host sintesis implementacion placa"
     [rtl]="formal rvfi act traps rendimiento"
     [rapido]="formal act traps rendimiento sistema host"
-    [fpga]="sintesis implementacion"
+    [fpga]="sintesis implementacion placa"
 )
 
 layer_field() {   # layer_field <capa> <n>
@@ -53,10 +55,14 @@ missing_tools() {   # imprime lo que falta para la capa
             cmd:*) command -v "${need#cmd:}" > /dev/null || miss+=("${need#cmd:}") ;;
             dir:*) [ -d "$TOOLS_DIR/${need#dir:}" ] || miss+=("$TOOLS_DIR/${need#dir:}") ;;
             py:*)  python3 -c "import ${need#py:}" 2> /dev/null || miss+=("python3-${need#py:}") ;;
+            dev:placa) [ -e "$PLACA_PUERTO" ] || miss+=("placa conectada en $PLACA_PUERTO (PLACA_PUERTO=...)") ;;
         esac
     done
     echo "${miss[*]}"
 }
+
+# Puerto serie de la placa: el segundo canal del FTDI de la Nexys4 DDR (el primero es JTAG)
+PLACA_PUERTO=${PLACA_PUERTO:-/dev/ttyUSB1}
 
 # --- comandos de cada capa ------------------------------------------------------------
 VARIANT=""
@@ -102,6 +108,11 @@ run_sintesis() {
     echo "== mutantes (cada uno tiene que ser detectado)"
     fpga/synth_mutants.sh || rc=1
     return $rc
+}
+run_placa() {
+    sim/build.sh placa > /dev/null || return 1
+    echo "BUILD_ID esperado = $(build_id)   puerto = $PLACA_PUERTO"
+    python3 placa/run.py --puerto "$PLACA_PUERTO" --build-id "$(build_id)" --sim "$PROJ/build/sim/placa/Vtb"
 }
 run_implementacion() {
     [ -f "$PROJ/build/vivado/tp4.xpr" ] || { echo "no hay proyecto: correr antes la capa sintesis"; return 1; }

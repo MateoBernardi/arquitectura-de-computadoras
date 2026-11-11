@@ -21,7 +21,7 @@ Si una herramienta no está en `TOOLS_DIR`, se usa la del sistema.
 ```bash
 ./run.sh                           # todas las capas (~35 min)
 ./run.sh rapido                    # todo menos riscv-formal y Vivado (~6 min)
-./run.sh fpga                      # síntesis e implementación (~10 min, necesita Vivado)
+./run.sh fpga                      # síntesis, implementación y placa (~12 min, Vivado y la placa)
 ./run.sh act traps                 # solo algunas capas
 ./run.sh --variante hazard_unit_nostall rvfi act traps    # una variante
 ./run.sh --lista                   # capas, grupos y herramientas
@@ -52,6 +52,7 @@ y las versiones de las herramientas. Todo lo generado va a `build/`.
 | `host` | el software de la PC: protocolo, desensamblador y GUI |
 | `sintesis` | Vivado: el netlist es lo que pide el RTL (avisos justificados, sin latches, memorias), con mutantes |
 | `implementacion` | Vivado: STA completo (nada sin restringir; setup, hold, pulso), cruces de reloj, ruteo, DRC |
+| `placa` | la FPGA real por la UART: versión, programas y traps comparados contra la simulación, comandos de la debug unit ([`placa/README.md`](placa/README.md)) |
 
 Las capas de FPGA, y por qué no hay simulación de netlist ni capa de bitstream, están en
 [`fpga/README.md`](fpga/README.md).
@@ -135,6 +136,7 @@ verif/
 ├── sim/                  simulación con Verilator: ACT, traps, rendimiento
 ├── system/               el sistema completo (UART + debug unit + CPU), con Icarus
 ├── fpga/                 Vivado: crear el proyecto, síntesis, implementación, frecuencia máxima
+├── placa/                la FPGA real: programarla (JTAG) y probarla por la UART
 └── variants/             módulos alternativos para evaluar ideas
 ```
 

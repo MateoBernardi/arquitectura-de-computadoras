@@ -69,6 +69,7 @@ compara contra la simulación del RTL.
 **Sin capa de bitstream.** `write_bitstream` traduce la implementación ya ruteada, y su
 propio DRC frena si hay un problema. La trazabilidad (que el bitstream corresponda a un
 commit) la verifica la capa `placa`, que lee `BUILD_ID` del dump y lo compara con el commit.
+El bitstream se genera al programar la placa (`verif/placa/program.tcl` o la GUI).
 
 **Vivado para la síntesis, y no Yosys con equivalencia formal.** Se evaluó sintetizar con
 Yosys, probar formalmente que su netlist es equivalente al RTL, y usar Vivado solo para

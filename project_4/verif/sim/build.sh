@@ -3,6 +3,8 @@
 #   ./build.sh                       diseño base        → build/sim/base/Vtb
 #   ./build.sh hazard_unit_nostall   con una variante   → build/sim/hazard_unit_nostall/Vtb
 # (build/ es la de project_4/)
+#   ./build.sh placa                 diseño base con las memorias de la placa (1 KB)
+#                                    → build/sim/placa/Vtb (lo usa verif/placa)
 # Una variante (verif/variants/<nombre>.v) reemplaza al archivo del RTL que declara su
 # módulo (ver verif/tools/variant.sh).
 set -euo pipefail
@@ -19,17 +21,20 @@ FILES=(riscv_pipeline.v 1_fetch/imem.v
        flow/flush_unit.v flow/forward_unit.v flow/hazard_unit.v flow/trap_unit.v
        regs/pipe_reg.v)
 SRC=()
-if [ "$NAME" != base ]; then
+PARAMS=()
+if [ "$NAME" = placa ]; then
+    PARAMS=(-GIMEM_ADDR_W=10 -GDMEM_DEPTH=256)     # top_riscv: IMEM_ADDR_W = 10, DMEM_DEPTH = 256
+elif [ "$NAME" != base ]; then
     target=$(variant_target "$NAME")
     echo "variante $NAME: reemplaza $target"
 fi
 for f in "${FILES[@]}"; do
-    if [ "$NAME" != base ] && [ "$f" = "$target" ]; then SRC+=("$(variant_file "$NAME")")
+    if [ -n "${target:-}" ] && [ "$f" = "$target" ]; then SRC+=("$(variant_file "$NAME")")
     else SRC+=("$RTL/$f"); fi
 done
 
 verilator --binary --timing -O3 -Wno-fatal -Wno-WIDTH -Wno-lint \
-    -I"$RTL/3_execute" -I"$RF_CHECKS" --top-module tb -Mdir "$OUT/$NAME" -o Vtb \
+    -I"$RTL/3_execute" -I"$RF_CHECKS" --top-module tb "${PARAMS[@]}" -Mdir "$OUT/$NAME" -o Vtb \
     rvfi_sim.vh tb.sv "${SRC[@]}" -j 0 > "$OUT/$NAME.log" 2>&1 \
     || { tail -30 "$OUT/$NAME.log"; exit 1; }
 echo "$OUT/$NAME/Vtb"
