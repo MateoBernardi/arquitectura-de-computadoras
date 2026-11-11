@@ -1,164 +1,108 @@
 # `2_decode/` — etapa ID
 
-**Qué hace:** toma la instrucción y la convierte en (a) las señales de control del
-datapath, (b) el inmediato y (c) los dos operandos leídos del banco de registros.
+Convierte la instrucción en todo lo que necesitan las etapas siguientes: las señales de
+control, el inmediato y los dos operandos. También decide si la instrucción es legal.
+Todo eso entra en el registro ID/EX.
 
 ```
-id_inst ──▶ control ──▶ reg_write, alu_src, mem_read/write, branch, jump, halt,
-             │             wb_sel, alu_op, imm_sel
-             ├──▶ immgen ──▶ imm
-             └──▶ regfile ──▶ rdata1, rdata2
+            ┌──▶ control ──────▶ señales de control ─┐
+ instrucción├──▶ immgen ───────▶ inmediato ──────────┼──▶ ID/EX
+ (de IF/ID) ├──▶ regfile ──────▶ rdata1, rdata2 ─────┤
+            └──▶ illegal_check ▶ ilegal / ecall / ebreak ──▶ causa del trap
 ```
 
----
+Diagramas: entradas a la izquierda y salidas a la derecha, con su ancho en bits. En cada salida, **R** = sale de un registro (cambia en el flanco del reloj) y **C** = combinacional (cambia apenas cambian las entradas).
 
-## `control.v` — `control`
+## `control` — señales de control
 
-Decodifica `opcode` / `funct3` / `funct7` y genera todas las señales de control.
-Es **combinacional**, no tiene registros.
+Mira el opcode, `funct3` y `funct7`, y genera las señales que dicen qué hace la
+instrucción en cada etapa siguiente. Viajan con ella por los registros de pipeline.
 
-**Entradas**
+```
+            ┌──────────────────────┐
+opcode 7 ──▶│                      │──▶ reg_write 1  C
+funct3 3 ──▶│                      │──▶ alu_src   1  C
+funct7 7 ──▶│                      │──▶ mem_read  1  C
+            │                      │──▶ mem_write 1  C
+            │       control        │──▶ branch    1  C
+            │   [combinacional]    │──▶ jump      1  C
+            │                      │──▶ halt      1  C
+            │                      │──▶ wb_sel    2  C
+            │                      │──▶ alu_op    4  C
+            │                      │──▶ imm_sel   3  C
+            └──────────────────────┘
+```
 
-| Puerto | Ancho | Descripción |
+| Salida | Para quién | Qué decide |
 |---|---|---|
-| `opcode` | 7 | `instr[6:0]` |
-| `funct3` | 3 | `instr[14:12]` |
-| `funct7` | 7 | `instr[31:25]` |
+| `alu_op`, `alu_src` | EX | qué operación hace la ALU y si el segundo operando es el inmediato |
+| `branch`, `jump` | EX | si la instrucción puede cambiar el PC |
+| `mem_read`, `mem_write` | MEM | load o store |
+| `reg_write`, `wb_sel` | WB | si escribe un registro y con qué valor (ver [`5_writeback/`](../5_writeback/README.md)) |
+| `imm_sel` | `immgen` | el formato del inmediato: I, S, B, U o J |
+| `halt` | EX | instrucción `SYSTEM`: detiene el CPU (cuál es, y si es legal, lo dice `illegal_check`) |
 
-**Salidas**
+## `illegal_check` — ¿es RV32I?
 
-| Puerto | Ancho | Descripción |
+Decide si la instrucción es una de las 40 codificaciones de RV32I. Mira la instrucción
+entera, porque `ecall` y `ebreak` tienen una única codificación válida.
+
+```
+            ┌──────────────────────┐
+instr 32 ──▶│                      │──▶ illegal 1  C
+            │    illegal_check     │──▶ ecall   1  C
+            │   [combinacional]    │──▶ ebreak  1  C
+            │                      │
+            └──────────────────────┘
+```
+
+Es ilegal todo lo que no es RV32I: las instrucciones de otras extensiones (`csr*` de
+Zicsr, `fence.i` de Zifencei, `mul` de M…), las privilegiadas (`mret`, `wfi`), las
+comprimidas y cualquier combinación de campos que el estándar no define. Se verifica en
+forma exhaustiva contra la tabla oficial de codificaciones (`verif/formal/datapath`).
+
+Una instrucción ilegal, `ecall`, `ebreak` o traída desde fuera de la imem entra a ID/EX
+**sin** ningún efecto (no escribe, no salta, no accede a memoria), con `halt` y su causa.
+
+## `immgen` — el inmediato
+
+Arma el inmediato de 32 bits con signo a partir de los campos de la instrucción, según el
+formato que le indica `control`.
+
+```
+              ┌──────────────────────┐
+instr   32 ──▶│                      │──▶ imm 32  C
+imm_sel  3 ──▶│        immgen        │
+              │   [combinacional]    │
+              │                      │
+              └──────────────────────┘
+```
+
+## `regfile` — banco de registros
+
+Los 32 registros de 32 bits. ID lee dos (`rs1` y `rs2`) y WB escribe uno, en el mismo ciclo.
+
+```
+               ┌───────────────────────────────────┐
+clk       1 ──▶│                                   │──▶ rdata1   32  C
+rst       1 ──▶│                                   │──▶ rdata2   32  C
+we        1 ──▶│              regfile              │──▶ dbg_data 32  C
+waddr     5 ──▶│              [mixto]              │
+wdata    32 ──▶│  lee comb., escribe en el flanco  │
+raddr1    5 ──▶│                                   │
+raddr2    5 ──▶│                                   │
+dbg_addr  5 ──▶│                                   │
+               └───────────────────────────────────┘
+```
+
+- **x0 vale siempre 0**: escribirlo no tiene efecto y leerlo da 0.
+- **Lectura y escritura en el mismo ciclo** (`BYPASS = 1`): si WB escribe el registro que
+  ID está leyendo, la lectura devuelve el valor nuevo. Sin esto, ID leería el valor viejo y
+  haría falta un forwarding más.
+- **El reset borra x1..x31** en un ciclo. Por eso Vivado lo arma con flip-flops y no con
+  RAM, que no se puede borrar entera de una vez.
+- `dbg_addr` / `dbg_data` es un tercer puerto de lectura, para el bus de debug.
+
+| Parámetro | En el pipeline | Para qué |
 |---|---|---|
-| `reg_write` | 1 | la instrucción escribe en el regfile |
-| `alu_src` | 1 | el operando B de la ALU es el inmediato (si no, es rs2) |
-| `mem_read` | 1 | es un load |
-| `mem_write` | 1 | es un store |
-| `branch` | 1 | es un branch condicional |
-| `jump` | 1 | es JAL o JALR |
-| `halt` | 1 | opcode `SYSTEM` → frena el CPU (qué instrucción es, y si es legal, lo dice `illegal_check`) |
-| `wb_sel` | 2 | qué valor se escribe: `00`=ALU, `01`=MEM, `10`=PC+4, `11`=Uimm |
-| `alu_op` | 4 | código de operación de la ALU (ver `alu_ops.vh`) |
-| `imm_sel` | 3 | formato del inmediato: `000`=I, `001`=S, `010`=B, `011`=U, `100`=J |
-
-**Decodificación por opcode**
-
-| `opcode` | Tipo | Notas |
-|---|---|---|
-| `0110011` | R | `alu_op` según `{funct7[5], funct3}` |
-| `0010011` | I (ALU) | `alu_src=1`, inmediato I |
-| `0000011` | Load | `mem_read=1`, `wb_sel=01` |
-| `0100011` | Store | `mem_write=1`, inmediato S |
-| `1100011` | Branch | `branch=1`, inmediato B; `alu_op` = SUB o SLT/SLTU según `funct3` |
-| `1101111` | JAL | `jump=1`, `wb_sel=10` (PC+4), inmediato J |
-| `1100111` | JALR | `jump=1`, `alu_src=1`, `wb_sel=10` |
-| `0110111` | LUI | `wb_sel=11` (el inmediato U sin shift) |
-| `0010111` | AUIPC | `alu_src=1`, `alu_op=ADD` (PC + imm) |
-| `1110011` | SYSTEM | `halt=1` |
-
-> `alu_ops.vh` vive en `3_execute/`, pero `control.v` lo incluye igual para tener
-> los mismos códigos de operación.
-
----
-
-## `illegal_check.v` — `illegal_check`
-
-Decide si la instrucción es **una de las 40 de RV32I**. Combinacional. Mira la
-instrucción completa, no solo `opcode`/`funct3`/`funct7`: `ecall` y `ebreak` tienen una
-única codificación válida.
-
-| Puerto | Ancho | Descripción |
-|---|---|---|
-| `instr` | 32 | la instrucción (`id_inst`) |
-| `illegal` | 1 | no es RV32I → trap "instrucción ilegal" (causa 2) |
-| `ecall` | 1 | es exactamente `ecall` (`0x00000073`) |
-| `ebreak` | 1 | es exactamente `ebreak` (`0x00100073`) |
-
-| Opcode | Legal si |
-|---|---|
-| LUI, AUIPC, JAL | siempre |
-| JALR | `funct3 = 000` |
-| BRANCH | `funct3` ≠ `010`, `011` |
-| LOAD | `funct3` ∈ {LB, LH, LW, LBU, LHU} |
-| STORE | `funct3` ∈ {SB, SH, SW} |
-| OP-IMM | SLLI: `funct7 = 0000000`; SRLI/SRAI: `funct7` = `0000000` o `0100000` |
-| OP | `funct7 = 0000000`, o `0100000` para SUB y SRA |
-| MISC-MEM | `funct3 = 000` (FENCE; el resto de los campos se ignora, como pide la spec) |
-| SYSTEM | solo `ecall` y `ebreak` (no hay Zicsr: `csr*` es ilegal) |
-| cualquier otro (incluye `instr[1:0] ≠ 11`, es decir, instrucciones comprimidas) | nunca |
-
-En `riscv_pipeline.v`, una instrucción ilegal, `ecall`, `ebreak` o una instrucción
-traída desde fuera de la imem tiene anuladas `reg_write`, `mem_read`, `mem_write`,
-`branch` y `jump`, y entra a ID/EX con `halt = 1` y su causa.
-
----
-
-## `immgen.v` — `immgen`
-
-Extrae y sign-extiende el inmediato según el formato.
-
-**Entradas**
-
-| Puerto | Ancho | Descripción |
-|---|---|---|
-| `instr` | 32 | la instrucción completa |
-| `imm_sel` | 3 | formato, viene de `control` |
-
-**Salidas**
-
-| Puerto | Ancho | Descripción |
-|---|---|---|
-| `imm` | 32 | inmediato sign-extendido a 32 bits |
-
-**Formatos**
-
-| `imm_sel` | Formato | Bits del inmediato |
-|---|---|---|
-| `000` | I | `instr[31:20]` |
-| `001` | S | `instr[31:25]`, `instr[11:7]` |
-| `010` | B | `instr[31]`, `instr[7]`, `instr[30:25]`, `instr[11:8]`, `1'b0` |
-| `011` | U | `instr[31:12]`, `12'b0` |
-| `100` | J | `instr[31]`, `instr[19:12]`, `instr[20]`, `instr[30:21]`, `1'b0` |
-
-Los formatos B y JUv el bit 0 en 0 porque las direcciones son pares.
-
----
-
-## `regfile.v` — `regfile`
-
-Banco de 32 registros de 32 bits. Escritura **sincrónica**, lectura **asincrónica**.
-
-**Entradas**
-
-| Puerto | Ancho | Descripción |
-|---|---|---|
-| `clk` | 1 | |
-| `rst` | 1 | reset sincrónico: pone x1..x31 en 0 |
-| `we` | 1 | habilita la escritura |
-| `waddr` | 5 | registro destino (`rd`) |
-| `wdata` | 32 | dato a escribir |
-| `raddr1` | 5 | `rs1` |
-| `raddr2` | 5 | `rs2` |
-| `dbg_addr` | 5 | puerto de lectura del debug unit |
-
-**Salidas**
-
-| Puerto | Ancho | Descripción |
-|---|---|---|
-| `rdata1` | 32 | dato de `rs1` |
-| `rdata2` | 32 | dato de `rs2` |
-| `dbg_data` | 32 | `regs[dbg_addr]` |
-
-**Parámetro `BYPASS`**
-
-- `BYPASS = 1` (lo que usa el pipeline): si en el **mismo ciclo** se está escribiendo
-  `waddr`, la lectura de ese registro devuelve `wdata` en vez del valor viejo.
-  Es el **write-through interno**: sin él, el WB escribiría un registro y el ID
-  siguiente leería el valor anterior.
-- `BYPASS = 0` (CPU single-cycle): no hace falta y formaría un lazo combinacional.
-
-**Internals**
-
-- `regs[0:31]` — los 32 registros. Arrancan todos en 0 (`initial`).
-- `wr` — `we && (waddr != 0)`.
-- **x0 siempre vale 0**: la escritura con `waddr == 0` se ignora y la lectura de x0
-  devuelve 0 por hardware (no depende del contenido de `regs[0]`).
+| `BYPASS` | 1 | lectura del valor que se escribe en el mismo ciclo |

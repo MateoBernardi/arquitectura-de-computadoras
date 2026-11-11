@@ -1,148 +1,80 @@
-# `top/` — `top_riscv`
+# `top/` — `top_riscv`, el sistema en la placa
 
-**Qué hace:** el top del hardware para la **Nexys4 DDR**. Une la UART, la debug
-unit y el CPU, y maneja el reloj y el reset.
+Une todo lo que va en la FPGA y lo conecta a los pines de la Nexys4 DDR: el reloj, el
+reset, la UART, la debug unit y el CPU. No tiene lógica propia más allá de las conexiones,
+el reloj y la palabra de versión.
 
 ```
-                        ┌──────────────┐
-        i_clk ─────────▶│  MMCM (opcional) │──▶ clk (50 MHz)
-                        └──────┬───────┘
-                               │
-        i_reset ──▶ reset_gen ─┴──▶ sys_reset
-                               │
-        i_rx ─────▶ sync_2ff ─────┐
-                                  ▼
-                            uart_core ──▶ o_tx
-                                  │
-                                  ▼
-                            debug_unit ──▶ o_cpu_enable, o_cpu_reset
-                                  │
-                                  ▼
-                            riscv_pipeline ──▶ o_halt
-                                  │
-        o_led = {cpu_halt, cpu_reset, cpu_enable}
+  i_clk (100 MHz) ──▶ MMCM ──▶ reloj del sistema (50 MHz) ──▶ todo lo de abajo
+  i_reset (BTNC) ───▶ reset_gen ──▶ reset del sistema ──▶ uart_core, debug_unit
+  i_rx ──▶ sync_2ff ──▶ uart_core ◀──bytes──▶ debug_unit ◀──control, carga, bus──▶ riscv_pipeline
+  o_tx ◀───────────────── uart_core                │
+  o_led ◀────────────────────────────── estado del CPU (habilitado, en reset, detenido)
 ```
 
----
+Diagramas: entradas a la izquierda y salidas a la derecha, con su ancho en bits. En cada salida, **R** = sale de un registro (cambia en el flanco del reloj) y **C** = combinacional (cambia apenas cambian las entradas).
 
-## `top_riscv.v` — `top_riscv`
+```
+             ┌──────────────────────┐
+i_clk   1 ──▶│                      │──▶ o_tx  1  R
+i_reset 1 ──▶│      top_riscv       │──▶ o_led 3  C
+i_rx    1 ──▶│     [secuencial]     │
+             │                      │
+             └──────────────────────┘
+```
 
-**Entradas / salidas**
-
-| Puerto | Ancho | Descripción |
+| Pin | Placa | Qué es |
 |---|---|---|
-| `i_clk` | 1 | reloj de la placa (100 MHz) |
-| `i_reset` | 1 | botón de reset |
-| `i_rx` | 1 | línea RX del puerto serie |
-| `o_tx` | 1 | línea TX del puerto serie |
-| `o_led` | 3 | `[0]` CPU habilitado, `[1]` CPU en reset (carga), `[2]` halt |
+| `i_clk` | oscilador de 100 MHz | reloj de entrada |
+| `i_reset` | botón BTNC | reset del sistema (activo en alto) |
+| `i_rx`, `o_tx` | puente USB-serie (FTDI) | la UART hacia la PC: `/dev/ttyUSB1` en Linux |
+| `o_led[0]` | LD0 | CPU habilitado (corriendo) |
+| `o_led[1]` | LD1 | CPU en reset (por ejemplo, durante la carga) |
+| `o_led[2]` | LD2 | CPU detenido (`ebreak`, `ecall` o un trap) |
 
-**Parámetros**
+Los pines están en `constraints/nexys4ddr_top.xdc`.
 
-| Parámetro | Default | Para qué |
+## Parámetros
+
+| Parámetro | Valor | Para qué |
 |---|---|---|
-| `CLK_FREQ` | 100_000_000 | frecuencia de `i_clk` |
-| `USE_MMCM` | 1 | 1 → el sistema corre a `SYS_FREQ`, generada con el MMCM; 0 → usa `i_clk` directo (simulación) |
-| `MMCM_MULT` | 10 | VCO = `CLK_FREQ * MMCM_MULT` (600–1200 MHz en el Artix-7 -1) |
-| `MMCM_DIV_X8` | 160 | divisor de salida × 8 (pasos de 0,125): `SYS_FREQ = VCO / (MMCM_DIV_X8 / 8)` = 50 MHz |
-| `BAUD_RATE` | 19_200 | con el divisor entero, el error es ≤ 0,62 % a cualquier frecuencia ≥ 50 MHz |
-| `N_TICKS` | 16 | sobremuestreo del UART |
-| `PTR_LEN` | 2 | profundidad de los FIFOs (4 palabras) |
-| `IMEM_ADDR_W` | 10 | imem de 1 KB = 256 instrucciones |
-| `BUILD_ID` | 0 | versión del RTL (commit), última palabra del dump; la pasa la síntesis |
+| `CLK_FREQ` | 100 000 000 | frecuencia de `i_clk` (la del oscilador de la placa) |
+| `USE_MMCM` | 1 | 1: el sistema corre a `SYS_FREQ`, generada por el MMCM; 0: usa `i_clk` directo (simulación) |
+| `MMCM_MULT` | 10 | VCO = `CLK_FREQ` × `MMCM_MULT` (600 a 1200 MHz en el Artix-7 -1) |
+| `MMCM_DIV_X8` | 160 | divisor de salida × 8 (va en pasos de 0,125): `SYS_FREQ` = VCO / 20 = **50 MHz** |
+| `BAUD_RATE` | 19 200 | velocidad de la UART (ver [`../uart/README.md`](../uart/README.md)) |
+| `N_TICKS` | 16 | muestras por bit de la UART |
+| `PTR_LEN` | 2 | profundidad de las colas de la UART: 4 bytes |
+| `IMEM_ADDR_W` | 10 | imem de 1 KB (256 instrucciones) |
+| `BUILD_ID` | 0 | versión del RTL; la síntesis le pasa el commit (ver abajo) |
 
----
+## El reloj
 
-## El reloj: por qué el MMCM
+El sistema corre a **50 MHz**, generados por un MMCM a partir de los 100 MHz de la placa.
+No corre a 100 MHz porque el CPU no llega: su camino más largo (un load seguido de un salto
+que usa el dato: dmem → forwarding → ALU → comparación → descarte de las instrucciones del
+camino equivocado) tarda unos 16,5 ns, más que los 10 ns de 100 MHz.
 
-El camino crítico del pipeline (`dmem` → forwarding → ALU → branch → flush) **no
-cierra a 100 MHz** (WNS ≈ −5 ns post-ruteo). Con `USE_MMCM = 1` (default) todo el
-sistema corre a **`CLK_FREQ/2` = 50 MHz**, generado con un `MMCME2_BASE`:
+Se buscó la frecuencia máxima (`verif/fpga/fmax.sh`): entre 50 y 52,29 MHz el diseño cierra
+timing, y 60 MHz ya no. Una mejora significativa requeriría cambiar el pipeline; el detalle
+está en [`verif/fpga/README.md`](../../verif/fpga/README.md).
 
-```verilog
-MMCME2_BASE #(
-    .CLKIN1_PERIOD  (1.0e9 / CLK_FREQ),
-    .CLKFBOUT_MULT_F(MMCM_MULT * 1.0),     // VCO = CLK_FREQ * MMCM_MULT
-    .CLKOUT0_DIVIDE_F(MMCM_DIV_X8 / 8.0),  // SYS_FREQ = VCO / divisor
-    .DIVCLK_DIVIDE  (1)
-) u_mmcm (...);
-```
+Para cambiar la frecuencia alcanza con `MMCM_MULT` y `MMCM_DIV_X8`: la UART calcula su
+divisor con `SYS_FREQ`, y Vivado deriva la restricción del reloj del sistema a partir de la
+del reloj de entrada (en el XDC), así que no hay nada más que tocar. Mientras el MMCM no
+enganchó (`locked`), el sistema queda en reset.
 
-- Por defecto el VCO va a 1000 MHz y la salida dividida por 20 → **50 MHz**.
-- `BUFG` (`u_fb`, `u_out`) entre el MMCM y el resto del diseño, como pide Vivado.
-- El **baud rate se calcula con la frecuencia interna** (`SYS_FREQ`), no con
-  `CLK_FREQ`, así que la UART funciona a 19200 baud a cualquier frecuencia del sistema.
+## La palabra de versión
 
-Con `USE_MMCM = 0` el reloj es `i_clk` directo: es lo que se usa en simulación.
+La debug unit lee del CPU un mapa de 89 palabras; `top_riscv` le agrega una al final (la
+89): `BUILD_ID`, el commit del RTL con que se sintetizó. `verif/fpga/synth.tcl` lo pasa
+como parámetro (si `rtl/` y `constraints/` no tienen cambios sin commitear; si no, 0), el
+host lo muestra, y la verificación en la placa lo usa para comprobar que el bitstream
+cargado es el del commit que se está probando.
 
-`locked` se mete al reset: si el MMCM todavía no enganchó, el sistema está en reset.
+## Puertos asíncronos
 
----
-
-## El reset
-
-```
-reset_gen u_reset (
-    .i_clk      (clk),
-    .i_btn_reset(i_reset | ~locked),
-    .o_reset    (sys_reset)
-);
-```
-
-- `reset_gen` (en [`../common/`](../common/README.md)) genera el reset de power-on y
-  sincroniza el botón.
-- El reset del **sistema** (`sys_reset`) resetea la UART y la debug unit.
-- El **CPU** no recibe `sys_reset` directamente: su reset viene de la debug unit
-  (`o_cpu_reset`), que lo incluye. Así la debug unit puede resetear el CPU sola con
-  el comando `X`.
-
----
-
-## La línea RX
-
-```
-sync_2ff #(.INIT(1'b1)) u_rx_sync (.i_clk(clk), .i_async(i_rx), .o_sync(rx_sync));
-```
-
-Dos flip-flops para sincronizar la línea asíncrona de la UART con el reloj del
-sistema. `INIT = 1'b1` porque en reposo la línea UART está en 1.
-
----
-
-## Las conexiones
-
-**`uart_core`** → la debug unit:
-
-```verilog
-.i_read_uart   (rx_read),   .i_write_uart  (tx_write),
-.i_data_to_write(tx_data),  .o_tx_full     (tx_full),
-.o_rx_empty    (rx_empty),  .o_data_to_read(rx_data),
-```
-
-**`debug_unit`** → el CPU:
-
-```verilog
-.o_cpu_enable (cpu_enable), .o_cpu_reset (cpu_reset), .i_cpu_halt (cpu_halt),
-.o_imem_write_enable(imem_we), .o_imem_write_addr(imem_waddr), .o_imem_write_data(imem_wdata),
-.o_dbg_addr   (dbg_addr),   .i_dbg_data (dbg_data),   .i_dbg_count(dbg_count),
-```
-
-**`riscv_pipeline`** ← el CPU:
-
-```verilog
-.i_rst (cpu_reset), .i_enable(cpu_enable), .o_halt(cpu_halt),
-```
-
----
-
-## Los LEDs
-
-```verilog
-assign o_led = {cpu_halt, cpu_reset, cpu_enable};
-```
-
-| LED | Significado |
-|---|---|
-| `[0]` | `cpu_enable`: el CPU avanza ciclos. Fijo durante `R`; en `S` es un pulso de un ciclo (no se ve); apagado en pause, en halt y durante un dump |
-| `[1]` | `cpu_reset`: el CPU está en reset. Encendido mientras dura una carga (`L`), mientras se aprieta BTNC o si el MMCM no enganchó; el `X` es un pulso de un ciclo (no se ve) |
-| `[2]` | `cpu_halt`: un ECALL/EBREAK llegó a WB. Queda encendido hasta el próximo reset o carga |
+Ninguno de los pines tiene relación de fase con el reloj del sistema, y el diseño los trata
+así: `i_rx` e `i_reset` pasan por un sincronizador (`sync_2ff`) y `o_tx` sale de un
+registro. Por eso en el XDC están excluidos del análisis de timing (`set_false_path`), con
+el motivo escrito.

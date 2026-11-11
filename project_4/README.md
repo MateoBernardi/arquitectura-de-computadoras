@@ -1,218 +1,140 @@
-# project_4 — CPU RV32I de 5 etapas con debug unit por UART
+# project_4 — CPU RV32I de 5 etapas en FPGA, con debug unit por UART
 
-Núcleo RISC-V RV32I con pipeline de 5 etapas, pensado para correr en la Nexys4 DDR.
-Se lo puede controlar y depurar desde la PC por el puerto serie, con la GUI de `host/`.
+Un procesador RISC-V **RV32I** con pipeline de 5 etapas, para la placa **Nexys4 DDR**
+(Artix-7). Desde la PC, por el cable USB, se le cargan programas, se lo corre entero o
+ciclo a ciclo, y se lee su estado interno: los registros de cada etapa del pipeline, el
+banco de registros y la memoria de datos.
 
----
+```
+        PC                                       FPGA (top_riscv, 50 MHz)
+ ┌──────────────┐   USB   ┌──────┐   UART   ┌───────────┐   ┌─────────────┐   ┌────────────────┐
+ │ host/        │◀───────▶│ FTDI │◀────────▶│ uart_core │◀─▶│ debug_unit  │◀─▶│ riscv_pipeline │
+ │ GUI, CLI     │ 19200   └──────┘  8N1     └───────────┘   └─────────────┘   └────────────────┘
+ └──────────────┘                                    bytes      comandos       enable, reset, halt,
+                                                                               carga de la imem,
+                                                                               bus de debug
+```
 
-## 1. Estructura de carpetas
+- **`riscv_pipeline`** es el CPU. No sabe nada de la PC: recibe reloj, reset y enable, y
+  avisa cuándo se detiene.
+- **`debug_unit`** traduce comandos de un byte que llegan por la UART (cargar, correr, un
+  ciclo, pausar, reset, leer el estado) en acciones sobre el CPU.
+- **`uart_core`** convierte esos bytes en la señal serie que viaja por el cable USB.
+- **`host/`**, en la PC, habla ese protocolo: la GUI y la línea de comandos.
+
+## Cumplimiento de RV32I
+
+El CPU implementa RV32I **sin la arquitectura privilegiada** (sin CSRs). Toda excepción
+(instrucción ilegal, salto a una dirección no alineada, load/store desalineado o fuera de
+la memoria, `ecall`, `ebreak`) es un *fatal trap*, como lo permite la especificación: el
+CPU se detiene sin que la instrucción escriba nada, y la debug unit informa la causa (con
+los códigos estándar de `mcause`) y el PC.
+
+| Verificación | Resultado |
+|---|---|
+| riscv-formal: el CPU contra la ISA, para cualquier programa, incluidas las excepciones | 45/45 |
+| riscv-arch-test: la suite oficial (las instrucciones; sin CSRs no corre los tests de excepciones) | 39/39 |
+| en la placa: programas y traps iguales a la simulación del RTL, ciclo a ciclo | 40/40 |
+
+El detalle, y por qué riscv-arch-test no alcanza para las excepciones, está en
+[`verif/README.md`](verif/README.md).
+
+## Estructura
 
 ```
 project_4/
-├── README.md        ← este archivo (mapa general del proyecto)
-├── rtl/             ← el hardware (Verilog), con un README por carpeta
-│   ├── pipeline/    ← el CPU: 1_fetch … 5_writeback, regs/, flow/
-│   ├── uart/        ← UART TX + RX con FIFOs
-│   ├── debug/       ← debug unit (comandos por UART)
-│   ├── top/         ← top_riscv
-│   └── common/      ← reset y sincronizador
-├── constraints/     ← pines y reloj de la Nexys4 DDR (xdc)
-├── programs/        ← programas en assembly (benchmarks y pruebas)
-├── host/            ← lado PC (Python): GUI, CLI, benchmark en la placa
-│   ├── lib/         ← protocolo UART y ensamblador
-│   └── tests/
-├── verif/           ← verificación: RTL (formal, simulación), sistema, síntesis → implementación → bitstream → placa
-└── build/           ← todo lo generado (no se versiona)
+├── rtl/            el hardware (Verilog), con un README por carpeta
+│   ├── top/        top_riscv: une todo y lo conecta a la placa
+│   ├── pipeline/   el CPU: 1_fetch … 5_writeback, regs/, flow/
+│   ├── debug/      la debug unit
+│   ├── uart/       la UART con sus colas
+│   └── common/     reset y sincronizador
+├── constraints/    pines y reloj de la Nexys4 DDR
+├── programs/       programas en assembly (benchmarks y pruebas)
+├── host/           la PC: GUI, línea de comandos, benchmark en la placa
+├── verif/          la verificación, en el orden del flujo: RTL → sistema → FPGA → placa
+└── build/          todo lo generado (no se versiona)
 ```
 
-**Cada carpeta del RTL tiene su propio `README.md`** con el detalle de sus módulos
-(qué hace, puertos, registros y wires). Para el índice completo de archivos:
-
-| Carpeta | Contenido | README |
-|---|---|---|
-| `pipeline/` | el CPU de 5 etapas + el bus de debug | [pipeline/README.md](rtl/pipeline/README.md) |
-| `pipeline/1_fetch/` | `imem` — memoria de instrucciones | [1_fetch](rtl/pipeline/1_fetch/README.md) |
-| `pipeline/2_decode/` | `control`, `immgen`, `regfile` | [2_decode](rtl/pipeline/2_decode/README.md) |
-| `pipeline/3_execute/` | `alu`, `alu_ops.vh`, `branch_unit` | [3_execute](rtl/pipeline/3_execute/README.md) |
-| `pipeline/4_memory/` | `dmem` — memoria de datos | [4_memory](rtl/pipeline/4_memory/README.md) |
-| `pipeline/5_writeback/` | el camino de escritura al regfile | [5_writeback](rtl/pipeline/5_writeback/README.md) |
-| `pipeline/regs/` | `pipe_reg` — if_id / id_ex / ex_mem / mem_wb | [regs](rtl/pipeline/regs/README.md) |
-| `pipeline/flow/` | `hazard_unit`, `forward_unit`, `flush_unit` | [flow](rtl/pipeline/flow/README.md) |
-| `uart/` | `uart_core` + TX/RX + FIFOs | [uart](rtl/uart/README.md) |
-| `debug/` | `debug_unit` + FSM/registros/combinacional | [debug](rtl/debug/README.md) |
-| `top/` | `top_riscv` — une todo | [top](rtl/top/README.md) |
-| `common/` | `reset_gen`, `sync_2ff` | [common](rtl/common/README.md) |
-| `verif/system/` | testbench del sistema completo | [system](verif/system/README.md) |
-
----
-
-## 2. Jerarquía del hardware
-
-```
-top_riscv
-├── reset_gen ................ power-on reset + botón de reset sincronizado
-├── sync_2ff ................. sincronizador de la línea RX
-├── uart_core
-│   ├── baud_rate_gen ........ generador de tick de baud
-│   ├── uart_rx
-│   │   ├── uart_rx_comb ..... datapath combinacional
-│   │   ├── uart_rx_fsm ...... máquina de estados
-│   │   └── uart_rx_regs ..... estado + contadores + byte recibido
-│   ├── fifo (rx) ............ cola de recepción
-│   ├── uart_tx
-│   │   ├── uart_tx_comb
-│   │   ├── uart_tx_fsm
-│   │   └── uart_tx_regs
-│   └── fifo (tx) ............ cola de envío
-├── debug_unit ............... comandos por UART, control del CPU y bus de debug
-│   ├── debug_unit_comb
-│   ├── debug_unit_fsm
-│   └── debug_unit_regs
-└── riscv_pipeline ........... el CPU de 5 etapas
-    ├── imem ................. (1_fetch)
-    ├── if_id_reg ............ (regs)
-    ├── control .............. (2_decode)
-    ├── immgen ............... (2_decode)
-    ├── regfile .............. (2_decode)
-    ├── id_ex_reg ............ (regs)
-    ├── hazard_unit .......... (flow)
-    ├── alu_tp1 .............. (3_execute)
-    ├── branch_unit .......... (3_execute)
-    ├── forward_unit ......... (flow)
-    ├── flush_unit ........... (flow)
-    ├── ex_mem_reg ........... (regs)
-    ├── dmem ................. (4_memory)
-    └── mem_wb_reg ........... (regs)
-```
-
----
-
-## 3. El pipeline de 5 etapas
-
-```
-    IF                ID                EX                MEM              WB
- ┌─────────┐     ┌─────────┐      ┌─────────┐      ┌─────────┐     ┌─────────┐
- │  imem   │     │ control │      │  alu    │      │  dmem   │     │ regfile │
- │   PC    │────▶│ immgen  │─────▶│ branch  │─────▶│         │────▶│ (write) │
- │         │     │ regfile │      │ fwd mux │      │         │     │         │
- └─────────┘     └─────────┘      └─────────┘      └─────────┘     └─────────┘
-      │                │                │                │                │
-      └─ if_id_reg ────┴─ id_ex_reg ────┴─ ex_mem_reg ──┴─ mem_wb_reg ──┘
-```
-
-- **IF** — el PC lee la instrucción de la `imem` (lectura combinacional).
-- **ID** — `control` la decodifica y genera las señales de control, `immgen` arma el
-  inmediato, `regfile` lee los dos operandos.
-- **EX** — la `alu` opera; `branch_unit` evalúa la condición de salto y calcula el destino.
-- **MEM** — la `dmem` lee o escribe el dato.
-- **WB** — el mux final (`wb_sel`) elige el valor y se escribe en el `regfile`.
-
-**Control de flujo entre etapas** (carpeta `flow/`):
-
-| Situación | Qué pasa | Dónde |
-|---|---|---|
-| Dependencia RAW | se reenvía el valor desde EX/MEM o MEM/WB | `forward_unit` |
-| load-use | se congela 1 ciclo el pipeline | `hazard_unit` |
-| Salto tomado / JAL / JALR | se descartan las 2 instrucciones que van detrás del salto | `flush_unit` |
-
-Los saltos se resuelven **en EX**, así que un salto taken cuesta 2 burbujas.
-
----
-
-## 4. Bus de debug
-
-La debug unit lee un mapa de palabras de 32 bits del CPU (combinacional). El mapa
-completo está en el encabezado de [`riscv_pipeline.v`](rtl/pipeline/riscv_pipeline.v)
-y lo decodifica el host en `host/lib/debug_protocol.py` (`decode_dump`).
-
-| Dirección | Contenido |
+| README | Contenido |
 |---|---|
-| 0 | PC (IF) |
-| 1–2 | IF/ID: pc, instrucción |
-| 3–8 | ID/EX: control, campos, pc, rdata1, rdata2, imm |
-| 9–13 | EX: alu_a, alu_b, alu_out, destino del salto, flags |
-| 14–17 | EX/MEM: control, alu_out, rdata2, campos |
-| 18 | MEM: dato leído de la dmem |
-| 19–21 | MEM/WB: control, resultado, rd |
-| 22–53 | x0..x31 del regfile |
-| 54–85 | 32 palabras de la dmem |
+| [`rtl/top/`](rtl/top/README.md) | el sistema, los pines, los parámetros y el reloj |
+| [`rtl/pipeline/`](rtl/pipeline/README.md) | el CPU: las etapas, los riesgos, las excepciones y el mapa del bus de debug |
+| [`rtl/pipeline/1_fetch/`](rtl/pipeline/1_fetch/README.md) … [`5_writeback/`](rtl/pipeline/5_writeback/README.md), [`regs/`](rtl/pipeline/regs/README.md), [`flow/`](rtl/pipeline/flow/README.md) | cada etapa y los módulos que la forman |
+| [`rtl/debug/`](rtl/debug/README.md) | la debug unit y el protocolo |
+| [`rtl/uart/`](rtl/uart/README.md) | la UART |
+| [`rtl/common/`](rtl/common/README.md) | reset y sincronización |
+| [`verif/`](verif/README.md) | la verificación |
 
----
+Cada README del RTL tiene un diagrama por módulo con sus entradas y salidas, el ancho en
+bits de cada una, y qué es combinacional y qué es secuencial.
 
-## 5. El lado host (Python)
+## Configuración
 
-| Archivo | Qué hace |
+| Qué | Valor | Dónde se cambia |
+|---|---|---|
+| reloj del sistema | **50 MHz**, generados por un MMCM desde los 100 MHz de la placa | `MMCM_MULT` / `MMCM_DIV_X8` de `top_riscv` ([por qué 50 MHz](rtl/top/README.md#el-reloj)) |
+| UART | **19200 baudios, 8N1** | `BAUD_RATE` de `top_riscv` y `DEFAULT_BAUD` del host ([por qué 19200](rtl/uart/README.md)) |
+| memoria de instrucciones | 1 KB = 256 instrucciones | `IMEM_ADDR_W` de `top_riscv` |
+| memoria de datos | 1 KB = 256 palabras | `DMEM_DEPTH` de `riscv_pipeline` |
+| puerto serie en la PC | `/dev/ttyUSB1` (Linux; el `ttyUSB0` es el JTAG) | `--port` del host |
+
+La restricción del reloj está en `constraints/nexys4ddr_top.xdc` y es la del oscilador de
+100 MHz: Vivado deriva de ella la del reloj del sistema, así que cambiar la frecuencia no
+requiere tocar el XDC.
+
+## Uso
+
+**1. Crear el proyecto de Vivado y programar la placa.** El proyecto no se versiona: lo
+genera un script desde los fuentes.
+
+```bash
+vivado -mode batch -source verif/fpga/create_project.tcl   # → build/vivado/tp4.xpr
+verif/run.sh fpga                                          # síntesis + implementación verificadas
+vivado -mode batch -source verif/placa/program.tcl         # bitstream + programar por JTAG
+```
+
+También se puede abrir `build/vivado/tp4.xpr` en la GUI y usar *Generate Bitstream* y
+*Program Device*. La configuración por JTAG se pierde al apagar la placa.
+
+**2. Hablar con la placa desde la PC** (necesita `pyserial` y un ensamblador RISC-V; ver
+`host/`):
+
+```bash
+python3 host/gui.py                                                 # la GUI
+python3 host/debug_host.py --port /dev/ttyUSB1 asm programs/criba.s run wait dump
+python3 host/benchmark_runner.py --port /dev/ttyUSB1 --asm programs/criba.s
+```
+
+Los programas arrancan en la dirección 0 y terminan con `ebreak`. Cada uno es una
+secuencia de instrucciones (no hay sección de datos): los datos los escribe el programa en
+la dmem.
+
+## Verificación
+
+Un solo comando corre la verificación por capas, en el orden del flujo, y deja un resumen
+en `build/reports/resumen.md`:
+
+```bash
+verif/tools/install.sh        # instala las herramientas (una vez)
+verif/run.sh --lista          # las capas y qué herramienta le falta a cada una
+verif/run.sh                  # todo
+verif/run.sh rapido           # sin riscv-formal ni Vivado (~6 min)
+verif/run.sh fpga             # síntesis, implementación y placa
+verif/run.sh act traps        # capas sueltas
+```
+
+| Capa | Qué prueba |
 |---|---|
-| `host/gui.py` | GUI de debug: conectar, cargar programa, correr/paso a paso, ver registros y memoria |
-| `host/lib/debug_protocol.py` | protocolo UART de la debug unit + `decode_dump` / `disasm` |
-| `host/debug_host.py` | CLI para hablar con la FPGA (necesita `pyserial`) |
-| `host/lib/assemble.py` | wrapper de binutils: `.s` → `.hex`/`.bin` |
-| `host/tests/` | tests del protocolo y de la GUI |
+| `formal` | propiedades formales de los módulos del pipeline |
+| `rvfi` | el CPU completo contra la ISA (riscv-formal) |
+| `act` | la suite oficial riscv-arch-test |
+| `traps` | la causa y el PC de cada excepción |
+| `rendimiento` | ciclos y CPI, y las variantes del diseño |
+| `sistema` | el sistema completo simulado, manejado por la UART |
+| `host` | el software de la PC |
+| `sintesis`, `implementacion` | Vivado: que el netlist sea lo que pide el RTL, y el timing |
+| `placa` | la FPGA real, comparada contra la simulación |
 
-Protocolo UART (ver `host/lib/debug_protocol.py`):
-
-```
-'L' n_lo n_hi + 4n bytes LE  -> 'K' | 'E'   carga de programa
-'S' -> 'K' | 'H'              un ciclo
-'R' -> 'K' | 'H'              ejecución continua
-'P' -> 'K'                    pausa
-'X' -> 'K'                    reset del CPU
-'D' -> count + count palabras de 32 bits LE
-'H' espontáneo cuando el CPU llega a halt durante 'R'
-```
-
----
-
-## 6. Compilar y simular
-
-El proyecto de Vivado **no se versiona**: lo genera un script a partir de los fuentes.
-
-```bash
-vivado -mode batch -source verif/fpga/create_project.tcl    # → build/vivado/tp4.xpr
-```
-
-El top de hardware es `top_riscv` y el de simulación es `tb_top_riscv`. El script
-agrega `rtl/pipeline/3_execute` al include path, porque `alu_ops.vh` lo usan `alu.v`
-y `control.v`.
-
----
-
-## 7. Tests del host
-
-```bash
-cd project_4/host
-py -m unittest discover -s tests -v
-```
-
-No necesitan la FPGA: el puerto serie y el assembler están simulados.
-
----
-
-## 8. Verificación
-
-`verif/` verifica el proyecto por capas, en el orden del flujo RTL → sistema → FPGA. Un
-solo comando corre todo y deja un resumen en `build/reports/resumen.md`:
-
-```bash
-verif/tools/install.sh     # herramientas, una sola vez
-verif/run.sh               # todas las capas; verif/run.sh --lista para ver cuáles hay
-```
-
-Ver [verif/README.md](verif/README.md).
-
-`riscv_pipeline.v` tiene un bloque `ifdef RISCV_FORMAL` con la interfaz RVFI que usa
-riscv-formal. Vivado no define esa macro, así que no forma parte del hardware sintetizado.
-
-`verif/sim/` simula el RTL con Verilator y corre la suite oficial **riscv-arch-test** (ACT4),
-autoverificada contra Sail, el modelo de referencia de la ISA. Ver [verif/sim/README.md](verif/sim/README.md).
-
-**Cumplimiento:** el CPU implementa RV32I sin la arquitectura privilegiada (sin CSRs).
-Toda excepción (instrucción ilegal, salto a una dirección no alineada, load/store
-desalineado o fuera de memoria) es un *fatal trap*: el CPU se detiene sin que la
-instrucción escriba nada, y la debug unit muestra la causa y el PC. Resultados:
-riscv-formal 45/45, riscv-arch-test 39/39.
-
-riscv-arch-test, tal como lo corremos, **no prueba las excepciones**: lo hace con un
-manejador de traps en M-mode, que necesita CSRs. Que haya trap donde el estándar lo pide
-lo verifica riscv-formal. La causa y el PC que reporta el CPU los verifican tests propios
-(`verif/sim/run_traps.sh`), que existen por esa razón.
+Cada capa da PASS solo si corrió al menos una prueba y todas dieron bien; si falta una
+herramienta da SKIP, que nunca cuenta como PASS. Ver [`verif/README.md`](verif/README.md).

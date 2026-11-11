@@ -1,186 +1,93 @@
 # `debug/` — debug unit
 
-Es la que hace que se pueda depurar el CPU desde la PC. Habla con el host por UART
-y con el CPU por un **bus de debug** (lectura de un mapa de registros internos).
+Hace que el CPU se pueda cargar, controlar y observar desde la PC. Recibe comandos de un
+byte por la UART, maneja el CPU con tres señales (habilitar, resetear, saber si se
+detuvo), escribe los programas en la memoria de instrucciones y lee el estado interno
+del CPU por un **bus de debug**.
 
 ```
-   UART  ──▶ debug_unit ──▶ o_cpu_enable / o_cpu_reset / o_halt
-                            └──▶ bus de debug ──▶ riscv_pipeline
+            bytes                         enable / reset / halt
+  uart_core ◀────▶ debug_unit ─────────────────────────────────▶ riscv_pipeline
+                       │       carga de la imem (byte a byte)          ▲
+                       ├───────────────────────────────────────────────┤
+                       │       bus de debug: dirección → palabra       │
+                       └───────────────────────────────────────────────┘
 ```
 
-Está partida en 3 módulos, como el UART: FSM (lógica) + combinacional (datapath) +
-registros (estado).
+**Por qué existe:** el CPU no tiene periféricos ni un monitor propio. Sin la debug unit
+no habría forma de cargarle un programa ni de ver qué hizo. Con ella, la PC puede correrlo
+ciclo a ciclo y leer cada registro de pipeline, como en un simulador, pero sobre el
+hardware real.
 
----
+Diagramas: entradas a la izquierda y salidas a la derecha, con su ancho en bits. En cada salida, **R** = sale de un registro (cambia en el flanco del reloj) y **C** = combinacional (cambia apenas cambian las entradas).
 
-## `debug_unit.v` — `debug_unit`
+## `debug_unit`
 
-El módulo que junta todo.
+```
+                      ┌──────────────────────┐
+i_clk            1 ──▶│                      │──▶ o_fifo_rx_read       1  C
+i_reset          1 ──▶│                      │──▶ o_fifo_tx_write      1  C
+i_data_to_read   8 ──▶│                      │──▶ o_data_to_write      8  C
+i_fifo_rx_empty  1 ──▶│      debug_unit      │──▶ o_cpu_enable         1  C
+i_fifo_tx_full   1 ──▶│     [secuencial]     │──▶ o_cpu_reset          1  C
+i_cpu_halt       1 ──▶│                      │──▶ o_imem_write_enable  1  R
+i_dbg_data      32 ──▶│                      │──▶ o_imem_write_addr   10  R
+i_dbg_count     16 ──▶│                      │──▶ o_imem_write_data    8  R
+                      │                      │──▶ o_dbg_addr          16  R
+                      └──────────────────────┘
+```
 
-**Entradas**
+`o_imem_write_addr` tiene `IMEM_ADDR_W` bits (10 en el sistema: 1 KB). Las salidas C se
+calculan a partir del estado de la máquina (registros), así que cambian en el flanco
+aunque pasen por lógica combinacional.
 
-| Puerto | Ancho | Descripción |
+| Parámetro | En el sistema | Para qué |
 |---|---|---|
-| `i_clk` | 1 | |
-| `i_reset` | 1 | reset del sistema |
-| `i_data_to_read` | 8 | byte recibido de la UART |
-| `i_fifo_rx_empty` | 1 | no hay nada para leer en la UART |
-| `i_fifo_tx_full` | 1 | la UART no puede recibir más |
-| `i_cpu_halt` | 1 | el CPU llegó a un halt |
+| `IMEM_ADDR_W` | 10 | tamaño de la imem en bytes: 2^10 = 1 KB = 256 instrucciones |
 
-**Salidas**
+### Con el CPU
 
-| Puerto | Ancho | Descripción |
-|---|---|---|
-| `o_fifo_rx_read` | 1 | pide un byte a la UART |
-| `o_fifo_tx_write` | 1 | escribe un byte en la UART |
-| `o_data_to_write` | 8 | byte a enviar |
-| `o_cpu_enable` | 1 | habilita (o pausa) el CPU |
-| `o_cpu_reset` | 1 | reset del CPU |
-| `o_imem_write_enable` | 1 | escritura en la imem (carga de programa) |
-| `o_imem_write_addr` | 8 | dirección en bytes |
-| `o_imem_write_data` | 8 | byte |
-| `o_dbg_addr` | 16 | dirección del bus de debug |
-| `i_dbg_data` | 32 | palabra leída |
-| `i_dbg_count` | 16 | cantidad de palabras del mapa |
+| Señal | Qué hace |
+|---|---|
+| `o_cpu_enable` | 1 = el CPU avanza: un solo ciclo con `S`, continuamente con `R`. Vale 0 en cuanto el CPU se detiene y mientras se hace un dump, así el estado no cambia mientras se lee |
+| `o_cpu_reset` | reset del CPU: con el reset del sistema, durante toda la carga (`L`) y con `X` |
+| `i_cpu_halt` | el CPU se detuvo (`ebreak`, `ecall` o un trap); durante `R` la debug unit lo avisa sola con `H` |
+| `o_imem_write_*` | escriben el programa en la imem, un byte por vez |
+| `o_dbg_addr` / `i_dbg_data` | piden una palabra del mapa de debug del CPU (ver [`../pipeline/README.md`](../pipeline/README.md)); `i_dbg_count` dice cuántas hay |
 
----
+La dirección del bus de debug se mantiene un ciclo antes de leer el dato, así el mismo
+bus sirve para fuentes combinacionales y para fuentes con un ciclo de latencia.
 
 ## El protocolo
 
-Un byte de comando por UART. Cada comando tiene una respuesta.
+Un byte de comando; cada comando tiene su respuesta.
 
-| Byte | Comando | Respuesta | Qué hace |
-|---|---|---|---|
-| `L` | load | `K` / `E` | carga de programa: `n_lo`, `n_hi` y después `4n` bytes little-endian |
-| `S` | step | `K` / `H` | avanza **un ciclo** |
-| `R` | run | `K` / `H` | ejecución continua |
-| `P` | pause | `K` | pausa |
-| `X` | reset | `K` | reset del CPU |
-| `D` | dump | — | `count_lo`, `count_hi` y después `count` palabras de 32 bits little-endian |
-| otro | — | `?` | comando desconocido |
-
-`H` (halt) también llega **espontáneo**: si el CPU se detiene (ECALL, EBREAK o un trap)
-mientras está en modo `R`, la debug unit responde `H` sola. La causa está en el dump
-(palabras 86–88).
-
-`L` y `X` resetean el CPU (PC, registros y pipeline) pero **no borran la dmem**:
-ver [La dmem entre programas](../pipeline/4_memory/README.md#la-dmem-entre-programas).
-
-El `count` del dump lo define el CPU (`i_dbg_count`): son las 89 palabras del mapa
-de debug (ver [`../pipeline/README.md`](../pipeline/README.md)).
-
----
-
-## El bus de debug
-
-`o_dbg_addr` **se mantiene un ciclo antes** de muestrear `i_dbg_data`. Así el mismo
-cable sirve tanto para fuentes combinacionales (el mapa del CPU) como para fuentes
-con un ciclo de latencia (por ejemplo una BRAM de memoria de datos).
-
-`o_dbg_addr` se incrementa con cada palabra del dump, y el estado `DUMP_LATCH`
-justamente sirve para esperar ese ciclo de latencia.
-
----
-
-## `debug_unit_fsm.v` — `debug_unit_fsm`
-
-La lógica del protocolo: decodifica el comando, decide el próximo estado, las
-respuestas y las señales de control del datapath y del CPU.
-
-**Comandos y respuestas** (localparams)
-
-```verilog
-CMD_LOAD  = 8'h4C;  // 'L'      RSP_OK   = 8'h4B;  // 'K'
-CMD_STEP  = 8'h53;  // 'S'      RSP_ERR  = 8'h45;  // 'E'
-CMD_RUN   = 8'h52;  // 'R'      RSP_HALT = 8'h48;  // 'H'
-CMD_PAUSE = 8'h50;  // 'P'      RSP_UNK  = 8'h3F;  // '?'
-CMD_RESET = 8'h58;  // 'X'
-CMD_DUMP  = 8'h44;  // 'D'
-```
-
-**Estados**
-
-| Estado | Qué hace |
-|---|---|
-| `IDLE` (0) | espera un comando |
-| `LOAD_LEN_LO` | recibe el byte bajo de la longitud |
-| `LOAD_LEN_HI` | recibe el byte alto de la longitud |
-| `LOAD_DATA` | recibe los bytes del programa |
-| `LOAD_FILL` | el programa quedó más corto que la longitud: rellena con NOP |
-| `REPLY` | manda la respuesta y vuelve a `IDLE` |
-| `DUMP_CNT_LO` | recibe el byte bajo de la cantidad de palabras |
-| `DUMP_CNT_HI` | recibe el byte alto |
-| `DUMP_ADDR` | pide una palabra del bus de debug |
-| `DUMP_LATCH` | espera el ciclo de latencia del bus |
-| `DUMP_BYTE` | manda los 4 bytes de la palabra (little-endian) |
-
-**Salidas de control del CPU**
-
-| Puerto | Efecto |
-|---|---|
-| `o_cpu_enable` | 1 = el CPU avanza; 0 = pausado |
-| `o_cpu_reset` | 1 = reset del CPU (reset del sistema, carga o comando `X`) |
-| `o_run_next` / `o_step_next` | modos: correr / un paso |
-
----
-
-## `debug_unit_comb.v` — `debug_unit_comb`
-
-El datapath combinacional: los próximos valores de los registros de datos según los
-controles de la FSM, el byte que se manda por TX, y los flags que la FSM usa para
-decidir.
-
-**Flags que devuelve**
-
-| Flag | Significado |
-|---|---|
-| `o_len_zero` | la longitud que llega es 0 |
-| `o_load_last` | último byte del programa |
-| `o_in_range` | el contador de bytes está dentro de la imem |
-| `o_dbg_count_zero` | la cantidad de palabras del dump es 0 |
-| `o_dbg_last` | última palabra del dump |
-| `o_byte_last` | último byte de la palabra |
-
-**Registros que maneja**
-
-`i_len` (16 bits, longitud del programa), `i_byte_cnt` (18 bits, contador de bytes),
-`i_overflow`, `i_reply` (8 bits, la respuesta a mandar), `i_imem_addr`,
-`i_imem_data`, `i_dbg_addr`, `i_dbg_word`, `i_byte_idx` (2 bits, byte dentro de la
-palabra del dump).
-
----
-
-## `debug_unit_regs.v` — `debug_unit_regs`
-
-Los registros: estado de la FSM (`o_state`, 4 bits), los modos (`o_run`, `o_step`,
-`o_cpu_rst`) y los registros del datapath.
-
-Reset sincrónico activo en alto; **todo** vuelve a 0 (`IDLE = 0`).
-
-**Registros**
-
-| Registro | Ancho | Para qué |
+| Comando | Respuesta | Qué hace |
 |---|---|---|
-| `o_state` | 4 | estado de la FSM |
-| `o_run` | 1 | modo corrida continua |
-| `o_step` | 1 | modo un paso |
-| `o_cpu_rst` | 1 | pulso de reset del CPU |
-| `o_len` | 16 | longitud del programa a cargar |
-| `o_byte_cnt` | 18 | cuántos bytes se recibieron |
-| `o_overflow` | 1 | el programa no entra en la imem |
-| `o_reply` | 8 | respuesta a enviar |
-| `o_imem_we` | 1 | habilita la escritura en la imem |
-| `o_imem_addr` | 8 | dirección |
-| `o_imem_data` | 8 | byte |
-| `o_dbg_addr` | 16 | dirección del bus de debug |
-| `o_dbg_word` | 32 | palabra leída |
-| `o_byte_idx` | 2 | byte dentro de la palabra, para mandarlos little-endian |
+| `L` n_lo n_hi + 4n bytes | `K` / `E` | carga un programa de n palabras (little-endian). Si es más corto que la imem, el resto se llena con NOP. Si no entra, escribe las palabras que entran, descarta el resto y responde `E` |
+| `S` | `K` / `H` | avanza **un ciclo** (`H` si el CPU ya está detenido) |
+| `R` | `K` / `H` | ejecución continua; cuando el CPU se detiene llega `H` sin que se pida |
+| `P` | `K` | pausa la ejecución continua |
+| `X` | `K` | reset del CPU: PC = 0, registros y pipeline en cero; el programa se conserva |
+| `D` | n_lo n_hi + 4n bytes | el dump: las n palabras del mapa de debug (little-endian) |
+| otro | `?` | comando desconocido |
 
----
+Ni `L` ni `X` borran la dmem: ver [La dmem entre programas](../pipeline/4_memory/README.md#la-dmem-entre-programas).
+El cliente del protocolo está en `host/lib/debug_protocol.py`.
 
-## Del lado del host
+## Cómo está armada
 
-El cliente del protocolo está en `host/lib/debug_protocol.py`; la decodificación del dump
-en `decode_dump()`. Si se agrega una palabra al mapa de debug, va **siempre al
-final** y hay que extender `decode_dump()`.
+Igual que el receptor y el transmisor de la UART: lo que decide separado de lo que guarda.
+
+| Módulo | Tipo | Qué hace |
+|---|---|---|
+| `debug_unit_fsm` | combinacional | la máquina de estados del protocolo: decodifica el comando, decide el próximo estado, la respuesta y las señales al CPU y a las colas |
+| `debug_unit_comb` | combinacional | el datapath: longitud y contador de la carga, dirección y dato de la imem, dirección del bus de debug, la palabra del dump y cuál de sus 4 bytes se envía |
+| `debug_unit_regs` | secuencial | todos los registros; en el reset vuelven a 0 (estado `IDLE`) |
+
+| Estados | Para qué |
+|---|---|
+| `IDLE` | espera un comando |
+| `LOAD_LEN_LO`, `LOAD_LEN_HI`, `LOAD_DATA`, `LOAD_FILL` | la carga: longitud, bytes del programa, relleno con NOP |
+| `DUMP_CNT_LO`, `DUMP_CNT_HI`, `DUMP_ADDR`, `DUMP_LATCH`, `DUMP_BYTE` | el dump: cantidad de palabras, y por cada una pedirla, esperar el ciclo del bus y enviar sus 4 bytes |
+| `REPLY` | envía la respuesta y vuelve a `IDLE` |

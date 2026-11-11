@@ -1,191 +1,114 @@
-# `flow/` — control de flujo entre etapas
+# `flow/` — el control de flujo entre etapas
 
-Acá están los **4 módulos que cruzan etapas**: ninguno pertenece a una sola, porque
-cada uno mira señales de dos o tres etapas distintas.
+Los módulos que no pertenecen a una sola etapa: cada uno mira dos o tres etapas a la vez y
+decide algo sobre el pipeline entero. Los cuatro son combinacionales; sus decisiones las
+aplican los registros de pipeline y el PC en el flanco siguiente.
 
-| módulo | qué lee | qué escribe | etapas que toca |
-|---|---|---|---|
-| `hazard_unit` | `id_rs1/id_rs2` (ID) + `ex_rd`/`ex_mem_read` (EX/MEM) | `stall` | **ID ↔ EX/MEM** |
-| `forward_unit` | `ex_rs1/ex_rs2` (EX) + `mem_rd` (MEM) + `wb_rd` (WB) | `forward_a/forward_b` | **EX ↔ MEM ↔ WB** |
-| `flush_unit` | `redirect` (sale de EX) | `flush_if_id`, `flush_id_ex` | **EX → IF/ID, ID/EX** |
-| `trap_unit` | salto y acceso a memoria de EX | `exc`, `cause`, `tval` | **EX → todo el pipeline** (vía `stop_fetch`) |
-
-Los cuatro son **combinacionales**.
-
----
-
-## `hazard_unit.v` — `hazard_unit`
-
-Detecta el **conflicto load-use**: un load en EX y la instrucción siguiente en ID
-usa el registro que el load va a escribir.
-
-```
-lw   x5, 0(x6)      ← en EX, ex_mem_read=1, ex_rd=5
-add  x5, x5, x1     ← en ID, id_rs1=5  →  stall
-```
-
-**Entradas**
-
-| Puerto | Ancho | Descripción |
+| Módulo | Mira | Decide |
 |---|---|---|
-| `ex_mem_read` | 1 | ¿la instrucción en EX es un load? |
-| `ex_rd` | 5 | destino del load |
-| `id_rs1` | 5 | `rs1` de la instrucción en ID |
-| `id_rs2` | 5 | `rs2` de la instrucción en ID |
+| `hazard_unit` | ID y EX | frenar un ciclo por un load-use |
+| `forward_unit` | EX, MEM y WB | de dónde sale cada operando de EX |
+| `flush_unit` | EX | descartar las instrucciones detrás de un salto tomado |
+| `trap_unit` | EX | si el salto o el acceso a memoria de EX es una excepción |
 
-**Salidas**
+Diagramas: entradas a la izquierda y salidas a la derecha, con su ancho en bits. En cada salida, **R** = sale de un registro (cambia en el flanco del reloj) y **C** = combinacional (cambia apenas cambian las entradas).
 
-| Puerto | Ancho | Descripción |
-|---|---|---|
-| `stall` | 1 | 1 → hay que congelar el pipeline 1 ciclo |
+## `hazard_unit` — stall de load-use
 
-**Regla**
-
-```
-stall = ex_mem_read && (ex_rd != 0) && (ex_rd == id_rs1 || ex_rd == id_rs2)
-```
-
-**Efecto del stall** (en `riscv_pipeline.v`)
-
-- `flush_id_ex` |= `stall` → se mete una **burbuja** en ID/EX.
-- `pc_en = en & ~stall & ~stop_fetch` → el PC **no** avanza.
-- `if_id_reg` con `stall=1` → mantiene la instrucción en ID.
-
-Resultado: la instrucción que dependía del load espera 1 ciclo. Como el forwarding
-no existe entre ID y EX, esta espera es obligatoria.
-
-> Detecta **solo load-use**. Un conflict RAW entre dos ALU (por ejemplo
-> `add x5,x5,x1` seguido de `sub x2,x5,x3`) lo resuelve el forwarding, sin stall.
-
----
-
-## `forward_unit.v` — `forward_unit`
-
-Detecta el **conflicto RAW** (lectura después de escritura) y decide de qué registro
-de pipeline reenviar el valor.
-
-**Entradas**
-
-| Puerto | Ancho | Descripción |
-|---|---|---|
-| `ex_rs1` | 5 | `rs1` de la instrucción en EX |
-| `ex_rs2` | 5 | `rs2` de la instrucción en EX |
-| `mem_rd` | 5 | destino de la instrucción en MEM |
-| `mem_reg_write` | 1 | esa instrucción escribe un registro |
-| `wb_rd` | 5 | destino de la instrucción en WB |
-| `wb_reg_write` | 1 | esa instrucción escribe un registro |
-
-**Salidas**
-
-| Puerto | Ancho | Descripción |
-|---|---|---|
-| `forward_a` | 2 | de dónde sale el operando A |
-| `forward_b` | 2 | de dónde sale el operando B |
-
-**Codificación**
-
-| Código | Origen | Antigüedad |
-|---|---|---|
-| `2'b00` | el regfile (`ex_rdata1`/`ex_rdata2`) | sin conflicto |
-| `2'b10` | `mem_result` (EX/MEM) | instrucción de hace 1 |
-| `2'b01` | `wb_result` (MEM/WB) | instrucción de hace 2 |
-
-**Prioridad**
-
-EX/MEM tiene **más prioridad** que MEM/WB: si las dos escriben el mismo registro,
-el valor más reciente es el de EX/MEM.
-
-```verilog
-if (wb_rd == ex_rs1 && !(mem_reg_write && mem_rd == ex_rs1))
-    forward_a = 2'b01;
-```
-
-**Dónde se aplica** (en `riscv_pipeline.v`)
-
-```verilog
-case (forward_a)
-    2'b10:   fwd_a_val = mem_result;
-    2'b01:   fwd_a_val = wb_result;
-    default: fwd_a_val = ex_rdata1;
-endcase
-```
-
-Y de ahí salen los operandos de la ALU:
-
-```verilog
-wire [31:0] alu_a = ex_is_auipc ? ex_pc : fwd_a_val;
-wire [31:0] alu_b = ex_alu_src  ? ex_imm : fwd_b_val;
-```
-
----
-
-## `flush_unit.v` — `flush_unit`
-
-Un branch tomado, un JAL o un JALR invalidan las **2 instrucciones que van detrás
-del salto** y que ya estaban en el pipeline.
+Un load recién tiene su dato al final de MEM. Si la instrucción que viene detrás lo usa,
+cuando esa instrucción llega a EX el dato todavía no existe ni para el forwarding. La
+única salida es esperar: el pipeline frena IF e ID un ciclo y mete una burbuja en EX.
 
 ```
-        EX (salto tomado)
-             │ redirect
-             ▼
-   ┌─────────────────────┐
-   │  IF/ID  → burbuja   │   flush_if_id
-   │  ID/EX  → burbuja   │   flush_id_ex
-   └─────────────────────┘
+lw   x5, 0(x6)     ← en EX: es un load y escribe x5
+add  x7, x5, x1    ← en ID: lee x5  →  stall
 ```
 
-**Entradas**
-
-| Puerto | Ancho | Descripción |
-|---|---|---|
-| `redirect` | 1 | EX: branch tomado, JAL o JALR |
-
-**Salidas**
-
-| Puerto | Ancho | Descripción |
-|---|---|---|
-| `flush_if_id` | 1 | vaciar el registro IF/ID |
-| `flush_id_ex` | 1 | meter una burbuja en ID/EX |
-
-Ambos son simplemente `redirect` (el módulo es un passthrough, pero deja la intención
-explícita y el lugar donde agregar lógica extra).
-
-**Consecuencia:** como los saltos se resuelven en EX, **todo salto taken cuesta 2
-burbujas**. La idea de `project_3` era resolver el JAL en ID para que cueste 1.
-
-**Efecto en el pipeline** (en `riscv_pipeline.v`)
-
-```verilog
-wire stop_fetch = ex_stop | halting;      // ex_stop = ex_halt | ex_exc
-wire flush_if_id = flush_if_id_r | stop_fetch;
-wire flush_id_ex = flush_id_ex_r | stop_fetch | stall;
+```
+                 ┌──────────────────────┐
+ex_mem_read 1 ──▶│                      │──▶ stall 1  C
+ex_rd       5 ──▶│     hazard_unit      │
+id_rs1      5 ──▶│   [combinacional]    │
+id_rs2      5 ──▶│                      │
+id_opcode   7 ──▶│                      │
+                 └──────────────────────┘
 ```
 
-`stop_fetch` hace lo mismo que un flush cuando la instrucción de EX detiene el CPU
-(ecall, ebreak o un trap): ninguna instrucción posterior puede ejecutarse.
+`stall` = la instrucción de EX es un load, su destino no es x0 y coincide con `rs1` o `rs2`
+de la de ID. La política base frena aunque la instrucción de ID no use realmente ese campo
+(por ejemplo, el `rs2` de una instrucción con inmediato): es conservadora, nunca incorrecta.
+`id_opcode` no lo usa la política base; está para las variantes de `verif/variants/`, que
+proponen otras políticas y se evalúan con la misma verificación.
 
----
+## `forward_unit` — forwarding
 
-## `trap_unit.v` — `trap_unit`
+Una instrucción en EX puede necesitar un registro que una instrucción anterior todavía no
+escribió en el regfile, porque está en MEM o en WB. En vez de esperar, se le pasa el valor
+directamente desde ahí.
 
-Las excepciones que se detectan en EX, para la instrucción que está en EX. Las de ID
-(ilegal, `ecall`, `ebreak`, fuera de la imem) llegan por `ex_halt`; ver `../README.md`.
+```
+                   ┌──────────────────────┐
+ex_rs1        5 ──▶│                      │──▶ forward_a 2  C
+ex_rs2        5 ──▶│                      │──▶ forward_b 2  C
+mem_rd        5 ──▶│     forward_unit     │
+mem_reg_write 1 ──▶│   [combinacional]    │
+wb_rd         5 ──▶│                      │
+wb_reg_write  1 ──▶│                      │
+                   └──────────────────────┘
+```
 
-| Puerto | Ancho | Descripción |
-|---|---|---|
-| `redirect`, `redirect_target` | 1, 32 | el salto de EX y su destino |
-| `mem_read`, `mem_write` | 1 | load / store |
-| `funct3` | 3 | tamaño del acceso |
-| `addr` | 32 | dirección del load/store (`alu_out`) |
-| `exc` | 1 | hay excepción |
-| `cause` | 4 | código estándar de `mcause` |
-| `tval` | 32 | la dirección que falló |
-| parámetro `DMEM_BYTES` | | tamaño de la dmem: las direcciones válidas son `[0, DMEM_BYTES)` |
+| `forward_a` / `forward_b` | El operando sale de |
+|---|---|
+| `00` | el regfile (no hay dependencia) |
+| `10` | EX/MEM: la instrucción inmediatamente anterior |
+| `01` | MEM/WB: la de dos instrucciones antes |
+
+Si las dos escriben el registro, gana EX/MEM: es el valor más reciente. x0 nunca se reenvía.
+
+## `flush_unit` — salto tomado
+
+Los saltos se resuelven en EX. Cuando uno se toma, las dos instrucciones que entraron detrás
+(en IF y en ID) son del camino equivocado y se descartan: IF/ID pasa a NOP e ID/EX a burbuja.
+Por eso un salto tomado cuesta 2 ciclos.
+
+```
+              ┌──────────────────────┐
+redirect 1 ──▶│                      │──▶ flush_if_id 1  C
+              │      flush_unit      │──▶ flush_id_ex 1  C
+              │   [combinacional]    │
+              │                      │
+              └──────────────────────┘
+```
+
+Hoy las dos salidas son `redirect`: el módulo deja explícita la decisión y el lugar donde
+cambiarla. El pipeline les suma los otros motivos para vaciar esas etapas: el stall
+(burbuja en ID/EX) y el CPU deteniéndose (nada posterior se ejecuta).
+
+## `trap_unit` — excepciones de EX
+
+Las excepciones que dependen de valores calculados en EX: el destino de un salto y la
+dirección de un load o store. Las de ID (ilegal, `ecall`, `ebreak`, fuera de la imem) llegan
+con la instrucción.
+
+```
+                      ┌──────────────────────┐
+redirect         1 ──▶│                      │──▶ exc    1  C
+redirect_target 32 ──▶│                      │──▶ cause  4  C
+mem_read         1 ──▶│      trap_unit       │──▶ tval  32  C
+mem_write        1 ──▶│   [combinacional]    │
+funct3           3 ──▶│                      │
+addr            32 ──▶│                      │
+                      └──────────────────────┘
+```
 
 | Condición | Causa |
 |---|---|
-| salto tomado con `redirect_target[1:0] ≠ 00` (no hay extensión C) | 0: el trap es **del salto**; el PC nunca queda desalineado |
-| LH/LHU/SH en dirección impar, LW/SW en dirección no múltiplo de 4 | 4 (load) / 6 (store) |
-| load/store con `addr ≥ DMEM_BYTES` | 5 (load) / 7 (store) |
+| salto tomado a una dirección no múltiplo de 4 | 0 (el trap es del salto: el PC nunca queda desalineado) |
+| media palabra en dirección impar, palabra en dirección no múltiplo de 4 | 4 (load) / 6 (store) |
+| dirección fuera de la dmem | 5 (load) / 7 (store) |
 
-Desalineado tiene prioridad sobre fuera de rango.
+Desalineado tiene prioridad sobre fuera de rango. `tval` es la dirección que falló.
+
+| Parámetro | En el sistema | Para qué |
+|---|---|---|
+| `DMEM_BYTES` | 1024 | las direcciones válidas de la dmem son [0, `DMEM_BYTES`) |

@@ -1,153 +1,131 @@
-# `pipeline/` — el CPU de 5 etapas
+# `pipeline/` — el CPU RV32I de 5 etapas
 
-Acá vive el núcleo: `riscv_pipeline.v` es el módulo que une todo y expone
-la interfaz con la debug unit.
+`riscv_pipeline` es el procesador: ejecuta RV32I en un pipeline de 5 etapas (IF, ID, EX,
+MEM, WB) y le expone a la debug unit lo justo para controlarlo y observarlo. No sabe nada
+de la UART ni de la placa: recibe un reloj, un reset y un enable, y avisa cuándo se detuvo.
 
-```
-riscv_pipeline.v
-├── 1_fetch/     imem.v
-├── 2_decode/    control.v, immgen.v, regfile.v
-├── 3_execute/   alu.v, alu_ops.vh, branch_unit.v
-├── 4_memory/    dmem.v
-├── 5_writeback/ (el camino de escritura vive repartido: ver el README)
-├── regs/        pipe_reg.v
-└── flow/        hazard_unit.v, forward_unit.v, flush_unit.v
-```
-
----
-
-## El diagrama
+Diagramas: entradas a la izquierda y salidas a la derecha, con su ancho en bits. En cada salida, **R** = sale de un registro (cambia en el flanco del reloj) y **C** = combinacional (cambia apenas cambian las entradas).
 
 ```
-    IF                ID                EX                MEM              WB
- ┌─────────┐     ┌─────────┐      ┌─────────┐      ┌─────────┐     ┌─────────┐
- │  imem   │     │ control │      │  alu    │      │  dmem   │     │ regfile │
- │   PC    │────▶│ immgen  │─────▶│ branch  │─────▶│         │────▶│ (write) │
- │         │     │ regfile │      │ fwd mux │      │         │     │         │
- └─────────┘     └─────────┘      └─────────┘      └─────────┘     └─────────┘
-      │                │                │                │                │
-      └─ if_id_reg ────┴─ id_ex_reg ────┴─ ex_mem_reg ──┴─ mem_wb_reg ──┘
+                   ┌──────────────────────┐
+clk           1 ──▶│                      │──▶ o_halt       1  R
+i_rst         1 ──▶│                      │──▶ o_dbg_data  32  C
+i_enable      1 ──▶│    riscv_pipeline    │──▶ o_dbg_count 16  C
+i_imem_we     1 ──▶│     [secuencial]     │
+i_imem_waddr 10 ──▶│                      │
+i_imem_wdata  8 ──▶│                      │
+i_dbg_addr   16 ──▶│                      │
+                   └──────────────────────┘
 ```
 
----
+| Puerto | Qué es |
+|---|---|
+| `i_rst` | reset sincrónico: PC = 0, pipeline vacío, x1..x31 en cero. No toca la imem ni la dmem |
+| `i_enable` | 0 congela todo el estado del CPU (no hay clock gating: cada registro tiene su enable). Así la debug unit lo pausa o lo avanza de a un ciclo |
+| `o_halt` | 1 cuando la instrucción que detiene el CPU (`ebreak`, `ecall` o un trap) llega a WB. En ese momento todo lo anterior ya se retiró, la instrucción que lo detuvo no escribió nada y ninguna posterior se ejecutó |
+| `i_imem_*` | el puerto de escritura de la imem, para cargar el programa (lo usa la debug unit con el CPU en reset) |
+| `i_dbg_addr` / `o_dbg_data` | el bus de debug: una dirección elige una palabra del estado interno (ver abajo); `o_dbg_count` es la cantidad de palabras (constante, 89) |
 
-## Interfaz con la debug unit
-
-`riscv_pipeline` expone todo lo que la debug unit necesita:
-
-| Puerto | Ancho | Descripción |
+| Parámetro | En el sistema | Para qué |
 |---|---|---|
-| `clk` | 1 | reloj del sistema |
-| `i_rst` | 1 | reset **sincrónico**: PC=0, pipeline vaciado, x1..x31 en 0. No borra la dmem; la imem se conserva. |
-| `i_enable` | 1 | 0 congela todos los elementos de estado (no hay clock gating). |
-| `o_halt` | 1 | nivel: 1 cuando una instrucción que detiene el CPU llega a WB: ECALL, EBREAK o un trap. |
-| `i_imem_we` | 1 | puerto de escritura de la imem (byte) |
-| `i_imem_waddr` | 10 | dirección (bytes) |
-| `i_imem_wdata` | 8 | dato |
-| `i_dbg_addr` | 16 | dirección del bus de debug |
-| `o_dbg_data` | 32 | palabra leída (combinacional) |
-| `o_dbg_count` | 16 | cantidad de palabras del mapa de debug |
+| `IMEM_ADDR_W` | 10 | imem de 2^10 bytes = 1 KB = 256 instrucciones |
+| `DMEM_DEPTH` | 256 | dmem de 256 palabras = 1 KB |
+| `IMEM_INIT` | "" | archivo `.hex` para precargar la imem (solo simulación) |
 
-El `o_halt` es de nivel: cuando vale 1, todo lo anterior ya se retiró, la instrucción
-que lo provocó no escribió nada, y ninguna instrucción posterior llegó a ejecutarse.
+Fuera del rango de cada memoria no hay nada: una instrucción traída desde fuera de la imem
+o un acceso fuera de la dmem es una excepción (ver abajo).
 
----
+## Las 5 etapas
+
+```
+     IF              ID               EX               MEM             WB
+ ┌────────┐      ┌─────────┐      ┌─────────┐      ┌────────┐      ┌─────────┐
+ │ PC     │      │ control │      │ ALU     │      │ dmem   │      │ mux del │
+ │ imem   │─────▶│ immgen  │─────▶│ saltos  │─────▶│        │─────▶│ resultado│──▶ regfile
+ │        │      │ regfile │      │ traps   │      │        │      │         │
+ └────────┘      └─────────┘      └─────────┘      └────────┘      └─────────┘
+          IF/ID            ID/EX            EX/MEM           MEM/WB
+                 └──── hazard_unit ───┘  forward_unit (EX ◀── MEM, WB)
+                                         flush_unit (EX ──▶ IF/ID, ID/EX)
+```
+
+| Etapa | Qué hace | Carpeta |
+|---|---|---|
+| IF | lee la instrucción en el PC | [`1_fetch/`](1_fetch/README.md) |
+| ID | la decodifica, arma el inmediato, lee los dos operandos y decide si es legal | [`2_decode/`](2_decode/README.md) |
+| EX | calcula (ALU), resuelve los saltos y detecta las excepciones de saltos y memoria | [`3_execute/`](3_execute/README.md) |
+| MEM | lee o escribe la memoria de datos | [`4_memory/`](4_memory/README.md) |
+| WB | escribe el resultado en el banco de registros | [`5_writeback/`](5_writeback/README.md) |
+
+Entre etapas hay un registro de pipeline ([`regs/`](regs/README.md)) que lleva la
+instrucción con todo lo que ya se calculó de ella. Los módulos que miran más de una
+etapa a la vez están en [`flow/`](flow/README.md):
+
+| Situación | Qué hace el pipeline | Costo | Quién lo decide |
+|---|---|---|---|
+| una instrucción usa un resultado que todavía no se escribió | lo reenvía desde EX/MEM o MEM/WB (forwarding) | 0 ciclos | `forward_unit` |
+| una instrucción usa el dato de un load que está en EX | frena IF e ID un ciclo (stall) | 1 ciclo | `hazard_unit` |
+| un salto tomado (branch, JAL, JALR) | descarta las 2 instrucciones que entraron detrás | 2 ciclos | `flush_unit` |
+| una excepción, `ecall` o `ebreak` | la instrucción no escribe nada, nada posterior se ejecuta, y el CPU se detiene al llegar a WB | — | `trap_unit`, `illegal_check` |
 
 ## Excepciones (fatal traps)
 
-El CPU implementa RV32I **sin la arquitectura privilegiada** (no hay CSRs). La spec no
-privilegiada permite que toda excepción sea un *fatal trap*: el entorno de ejecución, en
-este caso la debug unit, detiene la ejecución. Las causas usan los códigos estándar de
-`mcause`, y la debug unit las lee en las palabras 86–88 del mapa de debug.
+El CPU implementa RV32I **sin la arquitectura privilegiada** (no hay CSRs). La
+especificación no privilegiada permite que toda excepción sea un *fatal trap*: el
+entorno de ejecución (acá, la debug unit) detiene la ejecución. Las causas usan los
+códigos estándar de `mcause`.
 
 | Código | Causa | Se detecta en |
 |---|---|---|
-| 0 | salto o branch tomado a una dirección no alineada a 4 (el trap es **del salto**) | EX (`trap_unit`) |
-| 1 | instrucción fuera de la imem | ID (`id_pc`) |
-| 2 | instrucción ilegal: todo lo que no es RV32I, incluidas `csr*`, `fence.i`, `mret`, `wfi` | ID (`illegal_check`) |
+| 0 | salto tomado a una dirección no múltiplo de 4 (el trap es **del salto**) | EX (`trap_unit`) |
+| 1 | instrucción fuera de la imem | ID |
+| 2 | instrucción ilegal: todo lo que no es RV32I, incluidas `csr*`, `fence.i`, `mret` y las comprimidas | ID (`illegal_check`) |
 | 3 | `ebreak` | ID |
 | 4 / 6 | load / store desalineado | EX (`trap_unit`) |
 | 5 / 7 | load / store fuera de la dmem | EX (`trap_unit`) |
 | 11 | `ecall` | ID |
 
-Las causas de ID viajan con la instrucción (`id_ex_reg.cause`) y recién actúan en EX, igual
-que el halt de antes. Así, una instrucción del camino equivocado (detrás de un salto
-tomado) se descarta sin generar un trap. Cuando la instrucción de EX detiene el CPU
-(`ex_stop`):
-
-- no escribe registros ni memoria (`reg_write`, `mem_read` y `mem_write` se anulan);
-- `stop_fetch` congela el PC y vacía IF/ID e ID/EX: nada más joven se ejecuta;
-- llega a WB con `halt = 1`, y ahí `o_halt` detiene el CPU.
-
----
-
-## Señales internas que vale la pena mirar
-
-| Wire | Origen | Significado |
-|---|---|---|
-| `stall` | `hazard_unit` | load-use detectado: hay que congelar el pipeline 1 ciclo |
-| `redirect` | EX | un branch tomado, JAL o JALR cambió el PC |
-| `ex_stop` | EX | la instrucción de EX detiene el CPU: `ex_halt` (ecall/ebreak/ilegal/fuera de la imem) o `ex_exc` (`trap_unit`) |
-| `halting` | registro `halting_r` | pegajoso: 1 desde que `ex_stop` vale 1 hasta el reset |
-| `stop_fetch` | `ex_stop` + halting | ninguna instrucción posterior puede ejecutarse |
-| `trap_cause` / `trap_pc` / `trap_tval` | registros | por qué se detuvo el CPU (palabras 86–88 del mapa de debug) |
-| `flush_if_id` | `flush_unit` + stop_fetch | hay que vaciar IF/ID (instrucción del camino equivocado) |
-| `flush_id_ex` | `flush_unit` + stop_fetch + stall | hay que meter una burbuja en ID/EX |
-| `fwd_a_val` / `fwd_b_val` | mux de forwarding | operandos ya reenviados |
-| `mem_result` | mux `wb_sel` | valor que produce la instrucción (también se reenvía desde aquí) |
-| `redirect_target` | EX | destino del salto: `pc + imm` (branch/JAL) o `(rs1 + imm) & ~1` (JALR) |
-| `pc_next` | EX | `redirect ? redirect_target : pc + 4` |
-
----
+Las causas de ID viajan con la instrucción y recién actúan en EX. Así, una instrucción del
+camino equivocado (detrás de un salto tomado) se descarta sin provocar un trap. Cuando la
+instrucción de EX detiene el CPU, se le anulan las escrituras, se congela el PC y se
+vacían IF/ID e ID/EX; la instrucción sigue hasta WB y ahí `o_halt` vale 1. La causa, el PC
+y la dirección que falló quedan en las palabras 86 a 88 del bus de debug.
 
 ## El bus de debug
 
-Mapa de 89 palabras de 32 bits. La debug unit pide una por una con `i_dbg_addr`;
-`o_dbg_count` dice cuántas hay.
+Un mapa de palabras de 32 bits con el estado interno, que la debug unit lee de a una
+(combinacional: la palabra aparece en `o_dbg_data` en el mismo ciclo que la dirección).
+Es el contrato con el host: lo decodifica `decode_dump()` en `host/lib/debug_protocol.py`.
+Si se agrega una palabra, va siempre al final.
 
-| Dir | Contenido | Nota |
-|---|---|---|
-| 0 | `pc` | |
-| 1 | `id_pc` | |
-| 2 | `id_inst` | |
-| 3 | control de ID/EX | `[0]reg_write [1]mem_read [2]mem_write [3]branch [4]jump [5]is_jalr [6]is_auipc [7]halt [8]alu_src [10:9]wb_sel [14:11]alu_op` |
-| 4 | campos de ID/EX | `[4:0]rs1 [9:5]rs2 [14:10]rd [17:15]funct3` |
-| 5 | `ex_pc` | |
-| 6 | `ex_rdata1` | |
-| 7 | `ex_rdata2` | |
-| 8 | `ex_imm` | |
-| 9 | `alu_a` | después del forwarding |
-| 10 | `alu_b` | después del forwarding |
-| 11 | `alu_out` | |
-| 12 | `redirect_target` | |
-| 13 | flags de EX | `[0]stall [1]flush_if_id [2]flush_id_ex [3]redirect [4]branch_taken [5]zero [6]overflow [7]halting [9:8]forward_a [11:10]forward_b` |
-| 14 | control de EX/MEM | `[0]reg_write [1]mem_read [2]mem_write [3]halt [5:4]wb_sel` |
-| 15 | `mem_alu_out` | |
-| 16 | `mem_rdata2` | dato a escribir |
-| 17 | campos de EX/MEM | `[4:0]rd [7:5]funct3` |
-| 18 | `mem_rdata` | dato leído de la dmem |
-| 19 | control de MEM/WB | `[0]reg_write [1]halt` |
-| 20 | `wb_result` | valor final |
-| 21 | `wb_rd` | `[4:0]` |
-| 22–53 | x0..x31 | `dbg_reg_idx` |
-| 54–85 | 32 palabras de dmem | `dbg_dmem_idx` |
-| 86 | causa del trap | código de la tabla de excepciones; válido con `o_halt = 1` |
-| 87 | PC del trap | la instrucción que detuvo el CPU |
-| 88 | valor del trap | la dirección que falló (causas 0, 1, 4–7); 0 en las demás |
+| Palabra | Contenido |
+|---|---|
+| 0 | PC (IF) |
+| 1, 2 | IF/ID: PC, instrucción |
+| 3 | control de ID/EX: `[0]` reg_write `[1]` mem_read `[2]` mem_write `[3]` branch `[4]` jump `[5]` is_jalr `[6]` is_auipc `[7]` halt `[8]` alu_src `[10:9]` wb_sel `[14:11]` alu_op |
+| 4 | campos de ID/EX: `[4:0]` rs1 `[9:5]` rs2 `[14:10]` rd `[17:15]` funct3 |
+| 5 a 8 | ID/EX: PC, rdata1, rdata2, inmediato |
+| 9 a 12 | EX: operandos A y B de la ALU (después del forwarding), resultado, destino del salto |
+| 13 | flags de EX: `[0]` stall `[1]` flush IF/ID `[2]` flush ID/EX `[3]` redirect `[4]` branch tomado `[5]` zero `[6]` overflow `[7]` halting `[9:8]` forward_a `[11:10]` forward_b |
+| 14 | control de EX/MEM: `[0]` reg_write `[1]` mem_read `[2]` mem_write `[3]` halt `[5:4]` wb_sel |
+| 15, 16 | EX/MEM: dirección (resultado de la ALU), dato a escribir |
+| 17 | campos de EX/MEM: `[4:0]` rd `[7:5]` funct3 |
+| 18 | MEM: dato leído de la dmem |
+| 19 a 21 | MEM/WB: control (`[0]` reg_write `[1]` halt), resultado, rd |
+| 22 a 53 | x0 a x31 |
+| 54 a 85 | las primeras 32 palabras de la dmem |
+| 86 a 88 | el trap: causa, PC de la instrucción, dirección que falló (válidos con `o_halt = 1`) |
+| 89 | `BUILD_ID`, la versión del RTL: la agrega `top_riscv`, no el CPU |
 
-> `DBG_REGS = 22`, `DBG_DMEM = 22 + 32 = 54`, `DBG_TRAP = 54 + 32 = 86`, `DBG_COUNT = 89`.
-> Si se agrega una palabra al mapa, va **siempre al final** y hay que extender
-> `decode_dump()` en `host/lib/debug_protocol.py`.
+## Reset, enable y halt
 
----
+Las mismas reglas en todo el pipeline:
+- **reset** (`i_rst`): sincrónico; vacía cada etapa (NOP en IF/ID, burbuja en el resto).
+- **enable** (`i_enable`): con 0, ningún registro cambia, y se ignoran `stall` y `flush`.
+- **halt**: viaja con la instrucción que detiene el CPU hasta WB.
 
-## Reglas de reset y enable
+## Para la verificación
 
-Las tres son iguales en todo el pipeline:
-
-- **rst** — reset sincrónico: vacía la etapa (NOP / burbuja).
-- **en** — si vale 0, el CPU está pausado por la debug unit: los registros
-  **mantienen su valor** y se ignoran `flush` y `stall` mientras está pausado.
-- **halt** — viaja con la instrucción hasta WB, donde frena el CPU. Marca a una
-  instrucción que detiene la ejecución (ecall, ebreak o un trap).
-
+`riscv_pipeline.v` tiene un bloque `ifdef RISCV_FORMAL` con la interfaz RVFI que usa
+riscv-formal para comparar cada instrucción retirada contra la ISA. Vivado no define esa
+macro, así que no forma parte del hardware.
