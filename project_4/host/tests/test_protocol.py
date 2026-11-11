@@ -5,10 +5,11 @@ import sys
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+PROJ = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.dirname(HERE))
-sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(PROJ, "verif", "system"))   # rv32i_model: codificador independiente
 
-import debug_protocol as dp  # noqa: E402
+from lib import debug_protocol as dp  # noqa: E402
 import rv32i_model as model  # noqa: E402
 
 
@@ -83,7 +84,7 @@ class ProtocolTests(unittest.TestCase):
                          "Halt: ebreak (causa 3) en pc=0x00000008")
 
     def test_disasm_roundtrip(self):
-        src = open(os.path.join(HERE, "pipeline_test.s")).read()
+        src = open(os.path.join(PROJ, "programs", "pipeline_test.s")).read()
         words, lines = model.assemble(src)
         for i, (w, line) in enumerate(zip(words, lines)):
             if re.match(r"(beq|bne|blt|bge|jal)\b", line):

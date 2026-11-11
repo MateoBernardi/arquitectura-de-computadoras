@@ -7,8 +7,9 @@
 #   variant_file <nombre>     ruta absoluta de la variante (o error)
 #   variant_target <nombre>   ruta del archivo del RTL que reemplaza, relativa a pipeline/
 
-VARIANTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../variants" && pwd)"
-PIPELINE_RTL="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../project_4.srcs/sources_1/new/pipeline" && pwd)"
+source "$(dirname "${BASH_SOURCE[0]}")/../env.sh"
+VARIANTS_DIR="$PROJ/verif/variants"
+PIPELINE_RTL="$RTL_DIR/pipeline"
 
 variant_file() {
     local f="$VARIANTS_DIR/$1.v"

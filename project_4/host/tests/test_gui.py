@@ -17,7 +17,7 @@ for _p in (HOST, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-import debug_protocol as dp          # noqa: E402
+from lib import debug_protocol as dp  # noqa: E402
 
 # --------------------------------------------------------------- datos falsos
 PROG = [0x00500093, 0x00A00113, 0x002081B3]      # addi x1,x0,5 / addi x2,x0,10 / add x3,x1,x2
@@ -197,7 +197,7 @@ class GuiTests(unittest.TestCase):
         gui, app = self.gui, self.app
         _MessageBox.errors = []
         gui.messagebox = _MessageBox
-        from assemble import Assembled
+        from lib.assemble import Assembled
         gui.assemble_text = lambda src, max_words=None: Assembled(PROG, LISTING)
 
         fpga = FakeFPGA()

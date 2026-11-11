@@ -3,10 +3,11 @@
 benchmark_runner.py - Ejecuta y mide el benchmark en la FPGA física a través de UART.
 
 Modo de uso:
-    python3 host/benchmark_runner.py [--port /dev/ttyUSB1] [--baud 19200] [--asm host/criba.s]
+    python3 host/benchmark_runner.py [--port /dev/ttyUSB1] [--baud 19200] [--asm programs/criba.s]
 """
 import argparse
 import glob
+import os
 import sys
 import time
 
@@ -16,8 +17,8 @@ except ImportError:
     print("Error: Requiere pyserial. Instalar con: pip install pyserial")
     sys.exit(1)
 
-from assemble import assemble_file
-from debug_protocol import DebugLink, decode_dump, format_stages
+from lib.assemble import assemble_file
+from lib.debug_protocol import DebugLink, decode_dump, format_stages
 
 
 def auto_detect_port():
@@ -32,7 +33,7 @@ def main():
     parser = argparse.ArgumentParser(description="Medición de ciclos de benchmark en la FPGA.")
     parser.add_argument("--port", default=None, help="Puerto serie (ej. /dev/ttyUSB1 o COM3)")
     parser.add_argument("--baud", type=int, default=19200, help="Baudrate (default: 19200)")
-    parser.add_argument("--asm", default="host/criba.s", help="Archivo assembly a ejecutar")
+    parser.add_argument("--asm", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "programs", "criba.s"), help="Archivo assembly a ejecutar")
     parser.add_argument("--freq-mhz", type=float, default=50.0, help="Frecuencia del core en MHz (default: 50.0)")
     args = parser.parse_args()
 

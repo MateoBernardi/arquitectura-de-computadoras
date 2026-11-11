@@ -1,0 +1,92 @@
+# pipeline_control.  Correr con:  ./run.sh
+#
+# Tareas:
+#   bmc        — chequeo ACOTADO: ninguna ejecución de hasta 20 ciclos rompe T0..T8
+#   prove      — k-inducción con invariantes I1, I2: vale para CUALQUIER cantidad de ciclos
+#   cover      — escenarios concretos (stall, salto, halt, combinaciones)
+#   mut_*      — mutantes del RTL; se ESPERA FAIL
+[tasks]
+bmc
+prove
+cover
+mut_flush
+mut_stall
+mut_rstwr
+
+[options]
+bmc:       mode bmc
+bmc:       depth 20
+prove:     mode prove
+prove:     depth 8
+cover:     mode cover
+cover:     depth 20
+mut_flush: mode bmc
+mut_flush: depth 12
+mut_stall: mode bmc
+mut_stall: depth 12
+mut_rstwr: mode bmc
+mut_rstwr: depth 12
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+read -formal pipeline_props.sv
+read -formal imem_formal.v control.v immgen.v regfile.v alu.v branch_unit.v dmem.v forward_unit.v hazard_unit.v illegal_check.v trap_unit.v
+~mut_flush: read -formal flush_unit.v
+mut_flush:  read -formal flush_unit_mut_flush.v
+~mut_stall: read -formal pipe_reg.v
+mut_stall:  read -formal pipe_reg_mut_stall.v
+~mut_rstwr: read -formal riscv_pipeline.v
+mut_rstwr:  read -formal riscv_pipeline_mut_rstwr.v
+# dmem de 8 palabras en vez de 256: menos estado para el solver.
+chparam -set DMEM_DEPTH 8 riscv_pipeline
+hierarchy -top pipeline_props
+# -norom: sin esto, el case de control.v se vuelve una ROM (estado), que en la
+# inducción arranca con contenido arbitrario.
+proc -norom
+flatten
+# --- "referencias jerárquicas" hechas a mano: fv_X = dut.X ---
+# -nomap es imprescindible: sin él, connect resuelve alias y puede dejar
+# desconectado otro nombre del mismo cable.
+connect -nomap -set fv_pc              dut.pc
+connect -nomap -set fv_if_inst         dut.if_inst
+connect -nomap -set fv_id_inst         dut.id_inst
+connect -nomap -set fv_redirect_target dut.redirect_target
+connect -nomap -set fv_stall           dut.stall
+connect -nomap -set fv_redirect        dut.redirect
+connect -nomap -set fv_stop_fetch      dut.stop_fetch
+connect -nomap -set fv_halting         dut.halting
+connect -nomap -set fv_ex_reg_write    dut.ex_reg_write
+connect -nomap -set fv_ex_mem_read     dut.ex_mem_read
+connect -nomap -set fv_ex_mem_write    dut.ex_mem_write
+connect -nomap -set fv_ex_branch       dut.ex_branch
+connect -nomap -set fv_ex_jump         dut.ex_jump
+connect -nomap -set fv_ex_halt         dut.ex_halt
+connect -nomap -set fv_dmem_we         dut.u_dmem.we
+# el programa libre del harness entra a la imem formal
+connect -nomap -set dut.u_imem.fv_prog prog
+prep -top pipeline_props
+# Red de seguridad: si algún cable quedó sin conectar, que sea un error.
+check -assert
+
+[files]
+pipeline_props.sv
+../common/imem_formal.v
+../../../rtl/pipeline/riscv_pipeline.v
+../../../rtl/pipeline/2_decode/control.v
+../../../rtl/pipeline/2_decode/immgen.v
+../../../rtl/pipeline/2_decode/regfile.v
+../../../rtl/pipeline/3_execute/alu.v
+../../../rtl/pipeline/3_execute/alu_ops.vh
+../../../rtl/pipeline/3_execute/branch_unit.v
+../../../rtl/pipeline/4_memory/dmem.v
+../../../rtl/pipeline/flow/flush_unit.v
+../../../rtl/pipeline/flow/forward_unit.v
+../../../rtl/pipeline/flow/hazard_unit.v
+../../../rtl/pipeline/flow/trap_unit.v
+../../../rtl/pipeline/2_decode/illegal_check.v
+../../../rtl/pipeline/regs/pipe_reg.v
+build/mutants/flush_unit_mut_flush.v
+build/mutants/pipe_reg_mut_stall.v
+build/mutants/riscv_pipeline_mut_rstwr.v

@@ -31,12 +31,12 @@ VARIANTS=1 ./run_all.sh   # además, riscv-formal con cada variante
 
 | Carpeta | Alcance | Tipo de prueba |
 |---|---|---|
-| [`rvfi/`](rvfi/README.md) | **El CPU completo contra la ISA RV32I** (riscv-formal), incluidas las excepciones y que no se trabe | BMC desde el reset, 15 ciclos, cualquier programa |
-| [`../sim/`](../sim/README.md) | **La suite oficial riscv-arch-test**, tests de traps y el **sistema completo** (UART + debug unit + CPU) | simulación (Verilator, Icarus) |
-| [`forward_unit/`](forward_unit/README.md) | El operando de EX es siempre el valor más reciente | exhaustiva (combinacional) |
-| [`hazard_unit/`](hazard_unit/README.md) | El stall de load-use nunca falta; cuándo sobra | exhaustiva (combinacional) |
-| [`pipeline_control/`](pipeline_control/README.md) | Reset, congelamiento, stall, flush de saltos, halt y traps | inducción: cualquier cantidad de ciclos |
-| [`datapath/`](datapath/README.md) | Decodificación + ALU + saltos; qué instrucciones son legales; memoria de datos | exhaustiva / BMC |
+| [`formal/rvfi/`](formal/rvfi/README.md) | **El CPU completo contra la ISA RV32I** (riscv-formal), incluidas las excepciones y que no se trabe | BMC desde el reset, 15 ciclos, cualquier programa |
+| [`sim/`](sim/README.md), [`system/`](system/README.md) | **La suite oficial riscv-arch-test**, tests de traps y el **sistema completo** (UART + debug unit + CPU) | simulación (Verilator, Icarus) |
+| [`formal/forward_unit/`](formal/forward_unit/README.md) | El operando de EX es siempre el valor más reciente | exhaustiva (combinacional) |
+| [`formal/hazard_unit/`](formal/hazard_unit/README.md) | El stall de load-use nunca falta; cuándo sobra | exhaustiva (combinacional) |
+| [`formal/pipeline_control/`](formal/pipeline_control/README.md) | Reset, congelamiento, stall, flush de saltos, halt y traps | inducción: cualquier cantidad de ciclos |
+| [`formal/datapath/`](formal/datapath/README.md) | Decodificación + ALU + saltos; qué instrucciones son legales; memoria de datos | exhaustiva / BMC |
 
 `rvfi/` responde la pregunta principal: ¿el CPU hace lo que dice el manual de RISC-V para
 cualquier programa? Las otras carpetas prueban contratos de módulos individuales y
@@ -69,22 +69,22 @@ puertos** que uno del RTL. La variante reemplaza al archivo que declara ese mód
 
 ```bash
 ./rvfi/run.sh hazard_unit_nostall          # riscv-formal con la variante
-../sim/build.sh hazard_unit_nostall        # simulador con la variante
-VARIANT=hazard_unit_nostall ../sim/run_act.sh
-../sim/bench.py                            # rendimiento: base contra cada variante
+sim/build.sh hazard_unit_nostall        # simulador con la variante
+VARIANT=hazard_unit_nostall sim/run_act.sh
+sim/bench.py                            # rendimiento: base contra cada variante
 ```
 
 
 | Variante | Idea | Dónde se evalúa |
 |---|---|---|
-| `hazard_unit_precise.v` | frenar solo si la instrucción realmente lee el registro | `hazard_unit/`, `rvfi/`, `../sim/` |
-| `hazard_unit_nostall.v` | no frenar nunca en load-use | `rvfi/`, `../sim/` |
+| `hazard_unit_precise.v` | frenar solo si la instrucción realmente lee el registro | `hazard_unit/`, `rvfi/`, `sim/` |
+| `hazard_unit_nostall.v` | no frenar nunca en load-use | `rvfi/`, `sim/` |
 
 Cada variante responde tres preguntas: **¿cumple RV32I?** (riscv-formal y ACT), **¿cuánto
-gana?** (ciclos en `../sim/`) y **¿cuánto cuesta en hardware?** (timing y área en
+gana?** (ciclos en `sim/`) y **¿cuánto cuesta en hardware?** (timing y área en
 Vivado, con `scripts/`).
 
-| Variante | ¿Cumple? | Ciclos: suite ACT / suma_arreglo (tabla completa en `../sim/README.md`) |
+| Variante | ¿Cumple? | Ciclos: suite ACT / suma_arreglo (tabla completa en `sim/README.md`) |
 |---|---|---|
 | `hazard_unit_nostall.v` | sí: riscv-formal 45/45, ACT 39/39 | −7,4 % / −7,6 % |
 | `hazard_unit_precise.v` | sí: riscv-formal 45/45, ACT 39/39 | −0,2 % / 0 % |
@@ -138,14 +138,14 @@ entorno de ejecución (la debug unit) detiene la ejecución, y la causa (código
 | `ebreak` | halt, causa 3 (devuelve el control al debugger, como dice la spec) |
 
 En todos los casos, la instrucción que falla **no escribe nada** y no se ejecuta nada
-más joven. El detalle está en `../project_4.srcs/sources_1/new/pipeline/README.md`.
+más joven. El detalle está en `../rtl/pipeline/README.md`.
 
 **Cómo se comprueba**, con herramientas estándar y de forma independiente:
 
 | Herramienta | Qué prueba | Resultado |
 |---|---|---|
-| riscv-formal (`rvfi/`) | cualquier programa, contra la ISA, incluidas las excepciones y el mapa de memoria (`pma.sv`) | 45/45 PASS (con 6 mutantes que fallan) |
-| riscv-arch-test, ACT4 (`../sim/`) | la suite oficial, autoverificada contra Sail | 39/39 PASS |
-| `../sim/run_traps.sh` | cada causa de trap, en la instrucción correcta, y que no hay traps en el camino especulativo | 19/19 PASS |
-| `../sim/run_system.sh` | el sistema completo por la UART, incluida la causa del halt que ve la debug unit | 46/46 PASS |
-| `datapath/` (`illegal`) | toda codificación que no es RV32I es ilegal (las 2^32) | PASS |
+| riscv-formal (`formal/rvfi/`) | cualquier programa, contra la ISA, incluidas las excepciones y el mapa de memoria (`pma.sv`) | 45/45 PASS (con 6 mutantes que fallan) |
+| riscv-arch-test, ACT4 (`sim/`) | la suite oficial, autoverificada contra Sail: las instrucciones RV32I (suite I). Sin CSRs no corre los tests de excepciones | 39/39 PASS |
+| `sim/run_traps.sh` (test propio) | la causa y el PC que el CPU reporta en cada trap, y que no hay traps en el camino especulativo. Existe porque la suite oficial, tal como la corremos (sin CSRs), no prueba las excepciones | 19/19 PASS |
+| `system/run.sh` | el sistema completo por la UART, incluida la causa del halt que ve la debug unit | 46/46 PASS |
+| `formal/datapath/` (`illegal`) | toda codificación que no es RV32I es ilegal (las 2^32) | PASS |

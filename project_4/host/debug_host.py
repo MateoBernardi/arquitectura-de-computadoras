@@ -21,7 +21,7 @@ Despues de run, usar wait o pause antes de dump. Requiere pyserial.
 import argparse
 import sys
 
-from debug_protocol import DebugLink, ProtocolError, format_dump, read_program
+from lib.debug_protocol import DebugLink, ProtocolError, format_dump, read_program
 
 
 def run_actions(link, actions):
@@ -35,7 +35,7 @@ def run_actions(link, actions):
             path = actions[i]
             i += 1
             if action == "asm":
-                from assemble import assemble_file
+                from lib.assemble import assemble_file
                 words = assemble_file(path).words
             else:
                 words = read_program(path)

@@ -1,0 +1,69 @@
+# Datapath: decodificación + ALU + saltos, y la memoria de datos, contra el manual RV32I.
+#
+#   exec / exec_cover   — control + immgen + alu + branch_unit (combinacional, prueba completa)
+#   dmem / dmem_cover   — dmem contra un modelo de bytes (BMC, cualquier secuencia de 10 accesos)
+#   illegal             — illegal_check contra la lista oficial de RV32I (combinacional, prueba completa)
+#   mut_ill             — illegal_check que acepta funct7 = 0000001 (la extensión M): se ESPERA FAIL
+#   mut_sra             — ALU con SRA sin signo: se ESPERA FAIL
+#   mut_sb              — dmem con un error que tuvo una versión anterior: se ESPERA FAIL
+[tasks]
+exec        ex  chk
+exec_cover  ex  cov
+mut_sra     ex  chk
+dmem        dm  bmc
+dmem_cover  dm  cov
+mut_sb      dm  bmc
+illegal     il  chk
+mut_ill     il  chk
+
+[options]
+chk: mode prove
+bmc: mode bmc
+cov: mode cover
+ex:  depth 1
+dm:  depth 10
+il:  depth 1
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+ex: read -formal exec_props.sv control.v immgen.v branch_unit.v
+exec:       read -formal alu.v
+exec_cover: read -formal alu.v
+mut_sra:    read -formal alu_mut_sra.v
+ex: hierarchy -top exec_props
+dm: read -formal dmem_props.sv
+dmem:       read -formal dmem.v
+dmem_cover: read -formal dmem.v
+mut_sb:     read -formal dmem_mut_sb.v
+dm: chparam -set DEPTH 8 dmem
+dm: hierarchy -top dmem_props
+il: read -formal illegal_props.sv
+illegal:    read -formal illegal_check.v
+mut_ill:    read -formal illegal_check_mut_ill.v
+il: hierarchy -top illegal_props
+# proc -norom: sin esto Yosys convierte los 'case' grandes (control.v) en una
+# ROM, y una ROM es estado: en la inducción arranca con contenido arbitrario.
+proc -norom
+# memory_map: las memorias pasan a ser flip-flops comunes. Para memorias
+# chicas el solver va mucho más rápido que con la teoría de arrays.
+memory_collect
+memory_map
+prep
+check -assert
+
+[files]
+exec_props.sv
+dmem_props.sv
+illegal_props.sv
+../../../rtl/pipeline/2_decode/control.v
+../../../rtl/pipeline/2_decode/immgen.v
+../../../rtl/pipeline/3_execute/alu.v
+../../../rtl/pipeline/3_execute/alu_ops.vh
+../../../rtl/pipeline/3_execute/branch_unit.v
+../../../rtl/pipeline/4_memory/dmem.v
+../../../rtl/pipeline/2_decode/illegal_check.v
+build/mutants/alu_mut_sra.v
+build/mutants/dmem_mut_sb.v
+build/mutants/illegal_check_mut_ill.v

@@ -23,8 +23,8 @@ try:
 except Exception:                       # sin Pillow -> solapas planas
     _HAS_PIL = False
 
-from assemble import AssemblerError, INSTALL_HINT, assemble_text, hex_listing
-from debug_protocol import ABI, DebugLink, ProtocolError, decode_dump, disasm, format_stages, format_trap
+from lib.assemble import AssemblerError, INSTALL_HINT, assemble_text, hex_listing
+from lib.debug_protocol import ABI, DebugLink, ProtocolError, decode_dump, disasm, format_stages, format_trap
 
 IMEM_WORDS = 256                      # 2**IMEM_ADDR_W / 4 (top_riscv.v)
 SAMPLE = """# Suma 1..5 en x2 y la guarda en dmem[0]

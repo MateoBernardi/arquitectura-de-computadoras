@@ -23,25 +23,27 @@ stage() {   # stage <nombre> <comando...>
     fi
 }
 
-# riscv-formal: falla si algún chequeo no da PASS
+# riscv-formal: falla si el script falla, si no corrió ningún chequeo o si alguno no da PASS
 rvfi() {
-    rvfi/run.sh "$1" | tee /dev/stderr | awk 'NF == 2 && $2 != "PASS" { bad = 1 } END { exit bad }'
+    set -o pipefail
+    formal/rvfi/run.sh "$1" | tee /dev/stderr |
+        awk 'NF == 2 { n++; if ($2 != "PASS") bad = 1 } END { exit (bad || n == 0) }'
 }
 
-stage forward_unit        forward_unit/run.sh
-stage hazard_unit         hazard_unit/run.sh
-stage pipeline_control    pipeline_control/run.sh
-stage datapath            datapath/run.sh
+stage forward_unit        formal/forward_unit/run.sh
+stage hazard_unit         formal/hazard_unit/run.sh
+stage pipeline_control    formal/pipeline_control/run.sh
+stage datapath            formal/datapath/run.sh
 if [ "${RVFI:-1}" != 0 ]; then
     stage rvfi                rvfi checks
-    stage rvfi_mutantes       rvfi/mutants.sh
+    stage rvfi_mutantes       formal/rvfi/mutants.sh
     if [ "${VARIANTS:-0}" = 1 ]; then
         for v in "$VARIANTS_DIR"/*.v; do v=$(basename "$v" .v); stage "rvfi_$v" rvfi "$v"; done
     fi
 fi
-stage act                 ../sim/run_act.sh
-stage traps               ../sim/run_traps.sh
-stage sistema_uart        ../sim/run_system.sh
+stage act                 sim/run_act.sh
+stage traps               sim/run_traps.sh
+stage sistema_uart        system/run.sh
 stage host                bash -c 'cd ../host && python3 -m unittest discover -s tests'
-stage bench_variantes     ../sim/bench.py
+stage bench_variantes     sim/bench.py
 exit $STATUS
