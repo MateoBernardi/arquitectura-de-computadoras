@@ -87,6 +87,6 @@ pipeline_props.sv
 ../../../rtl/pipeline/flow/trap_unit.v
 ../../../rtl/pipeline/2_decode/illegal_check.v
 ../../../rtl/pipeline/regs/pipe_reg.v
-build/mutants/flush_unit_mut_flush.v
-build/mutants/pipe_reg_mut_stall.v
-build/mutants/riscv_pipeline_mut_rstwr.v
+../../../build/formal/pipeline_control/mutants/flush_unit_mut_flush.v
+../../../build/formal/pipeline_control/mutants/pipe_reg_mut_stall.v
+../../../build/formal/pipeline_control/mutants/riscv_pipeline_mut_rstwr.v

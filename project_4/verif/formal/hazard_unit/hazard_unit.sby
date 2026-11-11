@@ -42,5 +42,5 @@ prep -top hazard_unit_props
 hazard_unit_props.sv
 ../../variants/hazard_unit_precise.v
 ../../../rtl/pipeline/flow/hazard_unit.v
-build/mutants/hazard_unit_mut_rs2.v
-build/mutants/hazard_unit_mut_load.v
+../../../build/formal/hazard_unit/mutants/hazard_unit_mut_rs2.v
+../../../build/formal/hazard_unit/mutants/hazard_unit_mut_load.v

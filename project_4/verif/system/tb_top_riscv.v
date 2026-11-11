@@ -152,7 +152,8 @@ module tb_top_riscv;
             if (led[1] !== 1'b1) begin                 // CPU en reset durante la carga
                 errors = errors + 1;
                 $display("FAIL t=%0t: LED de carga apagado durante la carga", $time);
-            end
+            end else
+                $display("OK   LED de carga encendido durante la carga");
             for (w = 0; w < n_words; w = w + 1) begin
                 word = prog[w];
                 for (b = 0; b < 4; b = b + 1)
@@ -285,7 +286,8 @@ module tb_top_riscv;
             if (led[idx] !== value) begin
                 errors = errors + 1;
                 $display("FAIL t=%0t: LED%0d = %b, esperado %b", $time, idx, led[idx], value);
-            end
+            end else
+                $display("OK   LED%0d = %b", idx, value);
         end
     endtask
 
@@ -392,13 +394,15 @@ module tb_top_riscv;
         checks = checks + 1;
         if (framing_errors != 0) begin
             errors = errors + 1;
-            $display("FAIL: %0d errores de framing en TX", framing_errors);
-        end
+            $display("FAIL %0d errores de framing en TX", framing_errors);
+        end else
+            $display("OK   sin errores de framing en TX");
         checks = checks + 1;
         if (rxq_rd != rxq_wr) begin
             errors = errors + 1;
-            $display("FAIL: %0d bytes de mas recibidos", rxq_wr - rxq_rd);
-        end
+            $display("FAIL %0d bytes de mas recibidos", rxq_wr - rxq_rd);
+        end else
+            $display("OK   no sobran bytes recibidos");
 
         if (errors == 0)
             $display("PASS: %0d chequeos OK", checks);

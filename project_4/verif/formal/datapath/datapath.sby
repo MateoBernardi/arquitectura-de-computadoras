@@ -64,6 +64,6 @@ illegal_props.sv
 ../../../rtl/pipeline/3_execute/branch_unit.v
 ../../../rtl/pipeline/4_memory/dmem.v
 ../../../rtl/pipeline/2_decode/illegal_check.v
-build/mutants/alu_mut_sra.v
-build/mutants/dmem_mut_sb.v
-build/mutants/illegal_check_mut_ill.v
+../../../build/formal/datapath/mutants/alu_mut_sra.v
+../../../build/formal/datapath/mutants/dmem_mut_sb.v
+../../../build/formal/datapath/mutants/illegal_check_mut_ill.v

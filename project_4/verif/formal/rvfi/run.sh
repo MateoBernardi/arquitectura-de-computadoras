@@ -21,9 +21,13 @@ for t in "$@"; do targets+=("$t/status"); done
 make -C "$CORE/$CFG" -j"$(nproc)" -k "${targets[@]}" > "$CORE/$CFG/make.log" 2>&1
 STATUS=$?
 
-# Resumen: un renglón por chequeo
-for d in "$CORE/$CFG"/*/; do
-    printf '%-18s %s\n' "$(basename "$d")" "$(cut -d' ' -f1 "$d/status" 2>/dev/null || echo '?')"
-done | sort -k2 -k1
+# Un renglón por chequeo: [ok ] si dio PASS, [MAL] si no (FAIL, ERROR o no corrió)
+checks=("$@"); [ $# -gt 0 ] || checks=($(cd "$CORE/$CFG" && ls -d */ | tr -d /))
+for c in "${checks[@]}"; do
+    d="$CORE/$CFG/$c"
+    r=$(cut -d' ' -f1 "$d/status" 2>/dev/null || echo '?')
+    [ "$r" = PASS ] && m="ok " || m="MAL"
+    printf '[%s] %-18s %s\n' "$m" "$(basename "$d")" "$r"
+done | sort -k1,1r -k2
 echo "(resultados completos en $CORE/$CFG/)"
 exit $STATUS

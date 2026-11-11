@@ -33,6 +33,6 @@ prep -top forward_unit_props
 [files]
 forward_unit_props.sv
 ../../../rtl/pipeline/flow/forward_unit.v
-build/mutants/forward_unit_mut_prio.v
-build/mutants/forward_unit_mut_x0.v
-build/mutants/forward_unit_mut_rs2.v
+../../../build/formal/forward_unit/mutants/forward_unit_mut_prio.v
+../../../build/formal/forward_unit/mutants/forward_unit_mut_x0.v
+../../../build/formal/forward_unit/mutants/forward_unit_mut_rs2.v

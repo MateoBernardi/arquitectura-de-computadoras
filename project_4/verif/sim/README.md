@@ -4,7 +4,7 @@ Corre el RTL real (`riscv_pipeline` y todos sus módulos, sin cambios) con
 [Verilator](https://verilator.org). No hace falta Vivado.
 
 ```bash
-./build.sh [variante]   # compila build/<base|variante>/Vtb
+./build.sh [variante]   # compila build/sim/<base|variante>/Vtb (build/ de project_4)
 ./run_act.sh            # suite oficial riscv-arch-test (ACT4) contra Sail
 ./run_traps.sh          # tests dirigidos de excepciones
 ./bench.py              # tabla de rendimiento: diseño base contra cada variante
@@ -44,7 +44,7 @@ la placa.
 Una variante (`../variants/<nombre>.v`) declara un módulo con el mismo nombre y los
 mismos puertos que uno del RTL, y `build.sh <nombre>` la compila en lugar del archivo
 original. `bench.py` compila el diseño base y cada variante, corre los mismos programas
-y arma la tabla (también en `work/bench.md`). Para cada programa, una variante tiene que
+y arma la tabla (también en `build/sim/bench/bench.md`). Para cada programa, una variante tiene que
 terminar con **la misma firma y la misma cantidad de instrucciones** que el diseño base.
 Si no, se marca INCORRECTA. Se probó con una `forward_unit` sin forwarding desde MEM:
 queda marcada en todos los programas, aunque en varios "gana" ciclos.
@@ -125,16 +125,5 @@ El sistema completo (UART + debug unit + CPU) se prueba en `../system/`.
 
 ## Instalación
 
-Además de `.tools/oss-cad-suite` (Verilator):
-
-```bash
-cd .tools
-# Sail (modelo de referencia)
-mkdir -p sail && curl -L https://github.com/riscv/sail-riscv/releases/download/0.16/sail-riscv-Linux-x86_64.tar.gz \
-    | tar xz -C sail --strip-components=1
-# GCC 15 (ACT4 lo exige; xPack trae multilib rv32i)
-curl -L https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases/download/v15.2.0-1/xpack-riscv-none-elf-gcc-15.2.0-1-linux-x64.tar.gz | tar xz
-# riscv-arch-test y sus dependencias (uv, Ruby, vía mise)
-git clone https://github.com/riscv/riscv-arch-test.git
-cd riscv-arch-test && mise trust .mise.toml && mise install
-```
+Todas las herramientas (Verilator, Sail, GCC 15, riscv-arch-test) las instala
+`../tools/install.sh`. Ver `../README.md`.

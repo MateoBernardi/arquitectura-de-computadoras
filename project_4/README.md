@@ -188,12 +188,17 @@ No necesitan la FPGA: el puerto serie y el assembler están simulados.
 
 ---
 
-## 8. Verificación formal
+## 8. Verificación
 
-`verif/` verifica formalmente el CPU con herramientas libres (Yosys, SymbiYosys,
-[riscv-formal](https://github.com/YosysHQ/riscv-formal)), sin Vivado: el CPU completo contra
-la ISA RV32I, y contratos de módulos individuales (forwarding, hazards, control del
-pipeline, ALU, memoria de datos). Ver [verif/README.md](verif/README.md).
+`verif/` verifica el proyecto por capas, en el orden del flujo RTL → sistema → FPGA. Un
+solo comando corre todo y deja un resumen en `build/reports/resumen.md`:
+
+```bash
+verif/tools/install.sh     # herramientas, una sola vez
+verif/run.sh               # todas las capas; verif/run.sh --lista para ver cuáles hay
+```
+
+Ver [verif/README.md](verif/README.md).
 
 `riscv_pipeline.v` tiene un bloque `ifdef RISCV_FORMAL` con la interfaz RVFI que usa
 riscv-formal. Vivado no define esa macro, así que no forma parte del hardware sintetizado.

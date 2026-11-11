@@ -1,33 +1,56 @@
-# verif/ — verificación formal del CPU RV32I
+# verif/ — verificación del proyecto
 
-Verificación formal del pipeline de `project_4` con herramientas libres: Yosys,
-SymbiYosys, solvers SMT y [riscv-formal](https://github.com/YosysHQ/riscv-formal). No hace
-falta Vivado. Un solver busca **cualquier** entrada (programa, instrucción, valores) que
-viole una propiedad, y devuelve una demostración o un contraejemplo concreto.
+Sigue el flujo RTL → sistema → síntesis → implementación → bitstream → placa. Para el
+RTL usa herramientas libres (Yosys, SymbiYosys, solvers SMT,
+[riscv-formal](https://github.com/YosysHQ/riscv-formal), Verilator, Icarus,
+riscv-arch-test); Vivado solo hace falta para las etapas de FPGA.
 
 ## Instalación
 
-Las herramientas van en `.tools/`, en la raíz del repo (fuera de git):
+```bash
+verif/tools/install.sh        # instala lo que falte, con versiones fijas
+verif/run.sh --lista          # qué capa puede correr y qué le falta a cada una
+```
+
+Las herramientas van en `TOOLS_DIR`: por defecto `.tools/`, al lado de `project_4/`
+(fuera de git). Se puede usar otra carpeta con `TOOLS_DIR=/ruta verif/run.sh ...`.
+Si una herramienta no está en `TOOLS_DIR`, se usa la del sistema.
+
+## Cómo se corre
 
 ```bash
-# OSS CAD Suite (Yosys, SymbiYosys, solvers, Verilator)
-curl -L -o /tmp/oss.tgz https://github.com/YosysHQ/oss-cad-suite-build/releases/download/2026-10-27/oss-cad-suite-linux-x64-20261027.tgz
-mkdir -p .tools && tar -xzf /tmp/oss.tgz -C .tools
-# riscv-formal
-git clone https://github.com/YosysHQ/riscv-formal.git .tools/riscv-formal
-
-source project_4/verif/env.sh        # agrega las herramientas al PATH
+./run.sh                           # todas las capas (~25 min; riscv-formal es la más larga)
+./run.sh rapido                    # todo menos riscv-formal (~6 min)
+./run.sh act traps                 # solo algunas capas
+./run.sh --variante hazard_unit_nostall rvfi act traps    # una variante
+./run.sh --lista                   # capas, grupos y herramientas
 ```
+
+Cada prueba escribe un renglón `[ok ]` o `[MAL]`, y `run.sh` los cuenta. El resultado de
+una capa es:
+
+| Resultado | Significa |
+|---|---|
+| PASS | corrió al menos una prueba y todas dieron bien |
+| FAIL | alguna falló, el script terminó con error, **o no corrió ninguna prueba** |
+| SKIP | falta una herramienta: la capa no se probó. **Un SKIP nunca es un PASS** |
+
+El código de salida es 0 solo si todas las capas pedidas dan PASS (1 si alguna falla, 2
+si alguna quedó en SKIP). Los reportes quedan en `build/reports/` (de `project_4/`): un
+`<capa>.log` con la salida completa y `resumen.md` con la tabla de resultados, el commit
+y las versiones de las herramientas. Todo lo generado va a `build/`.
+
+| Capa | Qué prueba |
+|---|---|
+| `formal` | propiedades formales por módulo (forward_unit, hazard_unit, pipeline_control, datapath), con mutantes |
+| `rvfi` | el CPU completo contra la ISA RV32I con riscv-formal, incluidas las excepciones, con mutantes |
+| `act` | la suite oficial riscv-arch-test, autoverificada contra Sail: las instrucciones RV32I |
+| `traps` | tests propios: causa y PC que reporta cada trap (ACT, sin CSRs, no prueba excepciones) |
+| `rendimiento` | ciclos y CPI del diseño base y de cada variante; cada variante tiene que dar el mismo resultado |
+| `sistema` | el sistema completo (UART + debug unit + CPU), manejado por la línea serie |
+| `host` | el software de la PC: protocolo, desensamblador y GUI |
 
 ## Qué se verifica
-
-Todo junto, con un resumen por etapa:
-
-```bash
-./run_all.sh              # ~25 min (riscv-formal es lo más largo)
-RVFI=0 ./run_all.sh       # sin riscv-formal, ~5 min
-VARIANTS=1 ./run_all.sh   # además, riscv-formal con cada variante
-```
 
 | Carpeta | Alcance | Tipo de prueba |
 |---|---|---|
@@ -93,18 +116,20 @@ Vivado, con `scripts/`).
 
 ```
 verif/
-├── run_all.sh            toda la verificación, con un resumen por etapa
-├── env.sh                agrega .tools/ al PATH
+├── run.sh                punto de entrada: todas las capas, con resumen y reportes
+├── env.sh                rutas comunes (PROJ, RTL_DIR, TOOLS_DIR) y PATH de las herramientas
 ├── tools/
-│   ├── suite.sh          lógica común de los run.sh (mutantes, tareas, resultado esperado)
+│   ├── install.sh        instala las herramientas en TOOLS_DIR
+│   ├── suite.sh          lógica común de las suites formales (mutantes, resultado esperado)
 │   ├── variant.sh        qué archivo del RTL reemplaza cada variante
+│   ├── pyunit.py         corre los tests de Python con el formato [ok ]/[MAL]
 │   └── show_trace.py     muestra contraejemplos como tabla, con el programa desensamblado
-├── common/imem_formal.v  imem con programa libre (mismo contrato de puertos que la real)
-├── variants/             módulos alternativos para evaluar ideas
-├── rvfi/                 riscv-formal (wrapper, mapa de memoria, configuraciones, mutantes)
-├── forward_unit/  hazard_unit/  pipeline_control/  datapath/
-└── scripts/              etapas siguientes, una vez cerrado el RTL: chequeos de síntesis e
-                          implementación en Vivado (warnings críticos, latches, timing, ruteo)
+├── formal/               verificación formal: forward_unit/ hazard_unit/ pipeline_control/
+│                         datapath/ rvfi/ (riscv-formal) y common/imem_formal.v
+├── sim/                  simulación con Verilator: ACT, traps, rendimiento
+├── system/               el sistema completo (UART + debug unit + CPU), con Icarus
+├── fpga/                 Vivado: crear el proyecto, síntesis, implementación y bitstream
+└── variants/             módulos alternativos para evaluar ideas
 ```
 
 ## Cómo se observa el RTL sin modificarlo

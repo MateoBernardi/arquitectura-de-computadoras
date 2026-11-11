@@ -5,13 +5,13 @@
 set -u
 source "$(dirname "$0")/core.sh"
 RTL="$RTL_DIR/pipeline"
-mkdir -p "$RVFI_DIR/build/mutants"
+MUT="$PROJ/build/formal/rvfi/mutants"; mkdir -p "$MUT"
 STATUS=0
 
 # mutant <nombre> <archivo del RTL, relativo a pipeline/> <expr sed> <chequeo>
 mutant() {
     local name=$1 file=$2 expr=$3 check=$4
-    local out="$RVFI_DIR/build/mutants/$(basename "${file%.v}")_mut_$name.v"
+    local out="$MUT/$(basename "${file%.v}")_mut_$name.v"
     sed "$expr" "$RTL/$file" > "$out"
     if cmp -s "$RTL/$file" "$out"; then echo "ERROR: el mutante '$name' no cambió nada"; exit 1; fi
     local cfg="mut_$name"

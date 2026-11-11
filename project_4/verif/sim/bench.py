@@ -8,7 +8,7 @@ Para cada programa informa instrucciones retiradas, ciclos y CPI, y compara el e
 final (firma de registros y dmem) contra el diseño base: si una variante termina con
 otro estado, la marca como INCORRECTA. Los ELFs de ACT deben estar compilados
 (./run_act.sh); cada uno se autoverifica.
-Escribe la tabla también en work/bench.md.
+Escribe la tabla también en build/sim/bench/bench.md.
 """
 import glob
 import os
@@ -22,7 +22,7 @@ VARIANTS_DIR = os.path.join(ROOT, "verif", "variants")
 TOOLS_DIR = os.environ.get("TOOLS_DIR", os.path.join(os.path.dirname(ROOT), ".tools"))
 XPACK = glob.glob(os.path.join(TOOLS_DIR, "xpack-riscv-none-elf-gcc-*", "bin"))
 ENV = dict(os.environ, PATH=os.pathsep.join(XPACK + [os.environ["PATH"]]))
-WORK = os.path.join(HERE, "work", "bench")
+WORK = os.path.join(ROOT, "build", "sim", "bench")
 
 PROGRAMS = [  # (nombre, fuente) — todos terminan en ebreak
     ("criba", "programs/criba.s"),
@@ -32,7 +32,7 @@ PROGRAMS = [  # (nombre, fuente) — todos terminan en ebreak
     ("pipeline_test", "programs/pipeline_test.s"),
     ("test_bypass", "programs/test_bypass.s"),
 ]
-ACT_ELFS = sorted(glob.glob(os.path.join(HERE, "work", "tp4-rv32i", "elfs", "**", "*.elf"), recursive=True))
+ACT_ELFS = sorted(glob.glob(os.path.join(ROOT, "build", "sim", "act", "tp4-rv32i", "elfs", "**", "*.elf"), recursive=True))
 HALT = re.compile(r"ciclos=(\d+)\s+instrucciones=(\d+)\s+causa=(\d+).*firma=([0-9a-f]+)")
 
 
@@ -87,25 +87,32 @@ def main():
     rows = [n for n, _ in PROGRAMS] + ([f"ACT ({len(ACT_ELFS)} tests)"] if ACT_ELFS else [])
     head = "| Programa | Instrucciones | " + " | ".join(f"`{v}` ciclos (CPI)" for v in variants) + " |"
     out = [head, "|" + "---|" * (2 + len(variants))]
-    bad = []
+    bad, checks = [], []
     for n in rows:
         b = res[n, "base"]
         cells = []
         for v in variants:
             x = res[n, v]
-            if x is None or not x["ok"]:
-                cells.append("**FALLA**"); bad.append((n, v)); continue
+            if x is None or not x["ok"] or b is None:
+                cells.append("**FALLA**"); bad.append((n, v))
+                checks.append(f"[MAL] {n} con {v}: no terminó bien"); continue
             wrong = x["sig"] != b["sig"] or x["insns"] != b["insns"]
             cell = f"{x['cycles']} ({x['cycles'] / x['insns']:.3f})"
             if v != "base":
                 cell += f" {100 * (x['cycles'] - b['cycles']) / b['cycles']:+.1f}%"
             if wrong:
                 cell += " **INCORRECTA**"; bad.append((n, v))
+                checks.append(f"[MAL] {n} con {v}: estado final o instrucciones distintos del diseño base")
+            else:
+                checks.append(f"[ok ] {n} con {v}" + ("" if v == "base" else ": mismo resultado que el diseño base"))
             cells.append(cell)
         out.append(f"| {n} | {b['insns'] if b else '?'} | " + " | ".join(cells) + " |")
     table = "\n".join(out)
+    print("\n".join(checks) + "\n")
+    if not ACT_ELFS:
+        print("(sin la fila de ACT: no hay ELFs compilados; correr antes la capa act)\n")
     print(table)
-    with open(os.path.join(HERE, "work", "bench.md"), "w") as f:
+    with open(os.path.join(WORK, "bench.md"), "w") as f:
         f.write(table + "\n")
     if bad:
         print("\nFALLAS:", ", ".join(f"{n} con {v}" for n, v in bad))

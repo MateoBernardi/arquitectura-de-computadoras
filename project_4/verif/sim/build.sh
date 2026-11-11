@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # Compila el simulador con Verilator.
-#   ./build.sh                       diseño base        → build/base/Vtb
-#   ./build.sh hazard_unit_nostall   con una variante   → build/hazard_unit_nostall/Vtb
+#   ./build.sh                       diseño base        → build/sim/base/Vtb
+#   ./build.sh hazard_unit_nostall   con una variante   → build/sim/hazard_unit_nostall/Vtb
+# (build/ es la de project_4/)
 # Una variante (verif/variants/<nombre>.v) reemplaza al archivo del RTL que declara su
 # módulo (ver verif/tools/variant.sh).
 set -euo pipefail
 cd "$(dirname "$0")"
 source ../tools/variant.sh
 NAME=${1:-base}
+OUT="$PROJ/build/sim"; mkdir -p "$OUT"
 RTL=$PIPELINE_RTL
 RF_CHECKS="$TOOLS_DIR/riscv-formal/checks"   # rvfi_macros.vh
 
@@ -27,7 +29,7 @@ for f in "${FILES[@]}"; do
 done
 
 verilator --binary --timing -O3 -Wno-fatal -Wno-WIDTH -Wno-lint \
-    -I"$RTL/3_execute" -I"$RF_CHECKS" --top-module tb -Mdir "build/$NAME" -o Vtb \
-    rvfi_sim.vh tb.sv "${SRC[@]}" -j 0 > "build/$NAME.log" 2>&1 \
-    || { tail -30 "build/$NAME.log"; exit 1; }
-echo "build/$NAME/Vtb"
+    -I"$RTL/3_execute" -I"$RF_CHECKS" --top-module tb -Mdir "$OUT/$NAME" -o Vtb \
+    rvfi_sim.vh tb.sv "${SRC[@]}" -j 0 > "$OUT/$NAME.log" 2>&1 \
+    || { tail -30 "$OUT/$NAME.log"; exit 1; }
+echo "$OUT/$NAME/Vtb"

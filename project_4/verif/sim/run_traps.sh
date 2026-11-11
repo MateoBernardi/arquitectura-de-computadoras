@@ -8,9 +8,8 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 source "$HERE/../env.sh"
-export PATH="$(echo "$TOOLS_DIR"/xpack-riscv-none-elf-gcc-*/bin):$PATH"
 "$HERE/build.sh" ${VARIANT:-} > /dev/null    # siempre: así nunca se corre un binario viejo
-OUT="$HERE/work/traps"; mkdir -p "$OUT"
+OUT="$PROJ/build/sim/traps"; mkdir -p "$OUT"
 fail=0; n_run=0
 for s in "$HERE"/tests/traps/*.S; do
     n=$(basename "$s" .S); n_run=$((n_run + 1))
@@ -20,7 +19,7 @@ for s in "$HERE"/tests/traps/*.S; do
     if "$HERE/run_elf.sh" "$OUT/$n.elf" "+expect-cause=$cause" "+expect-pc=${pc#0x}" > "$OUT/$n.log" 2>&1; then
         printf '[ok ] %-16s causa %-2s\n' "$n" "$cause"
     else
-        printf '[XX ] %-16s %s\n' "$n" "$(grep -m1 'tb:' "$OUT/$n.log")"; fail=1
+        printf '[MAL] %-16s %s\n' "$n" "$(grep -m1 'tb:' "$OUT/$n.log")"; fail=1
     fi
 done
 [ "$n_run" -gt 0 ] || { echo "no se encontró ningún test en tests/traps/"; exit 1; }

@@ -11,7 +11,7 @@ verificar formalmente procesadores RISC-V. Cada chequeo es un BMC desde el reset
 ./mutants.sh                  # mutantes de los traps: cada uno tiene que FALLAR
 ```
 
-Los resultados quedan en `.tools/riscv-formal/cores/tp4/<config>/<chequeo>/`. Los
+Los resultados quedan en `$TOOLS_DIR/riscv-formal/cores/tp4/<config>/<chequeo>/`. Los
 contraejemplos están en `engine_0/trace.vcd`.
 
 ## Cómo está armado
@@ -30,7 +30,7 @@ contraejemplos están en `engine_0/trace.vcd`.
    ejecutar (la imem) y leer o escribir (la dmem). Un acceso fuera de ese mapa tiene que
    generar un trap, sin escribir nada.
 4. **`checks.cfg`** elige los chequeos y sus profundidades. `genchecks.py` genera un `.sby` por
-   chequeo dentro de `.tools/riscv-formal/cores/tp4/`, la carpeta que `run.sh` arma con
+   chequeo dentro de `$TOOLS_DIR/riscv-formal/cores/tp4/`, la carpeta que `run.sh` arma con
    enlaces a estos archivos.
 
 ## Los chequeos

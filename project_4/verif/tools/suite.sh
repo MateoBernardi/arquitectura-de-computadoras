@@ -12,10 +12,10 @@
 #                                        "brief" lista solo los covers alcanzados.
 # Al final, el run.sh termina con:  exit $STATUS
 
+_TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # antes del cd: la ruta puede ser relativa
+source "$_TOOLS/../env.sh"
 cd "$(dirname "$0")" || exit 1
-source "$(dirname "${BASH_SOURCE[0]}")/../env.sh"
-_TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD=build                     # todo lo generado va acá (ignorado por git)
+BUILD="$PROJ/build/formal/$(basename "$(pwd)")"   # todo lo generado (los .sby apuntan acá)
 STATUS=0
 mkdir -p "$BUILD/mutants"
 

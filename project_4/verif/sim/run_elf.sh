@@ -7,7 +7,6 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 [ "${1:-}" = "--elf" ] && shift
 ELF="$1"; shift
 source "$HERE/../env.sh"
-export PATH="$(echo "$TOOLS_DIR"/xpack-riscv-none-elf-gcc-*/bin):$PATH"
 CROSS="${CROSS:-riscv-none-elf}"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 "$CROSS-objcopy" -O binary "$ELF" "$TMP/img.bin" || exit 2
@@ -17,4 +16,4 @@ d = open(sys.argv[1], "rb").read()
 d += b"\0" * (-len(d) % 4)
 open(sys.argv[2], "w").write("".join("%08x\n" % w for w in struct.unpack("<%dI" % (len(d) // 4), d)))
 PY
-"$HERE/build/${VARIANT:-base}/Vtb" "+hex=$TMP/img.hex" "$@"
+"$PROJ/build/sim/${VARIANT:-base}/Vtb" "+hex=$TMP/img.hex" "$@"
