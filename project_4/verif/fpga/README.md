@@ -50,11 +50,54 @@ excluidos a propósito; un puerto **sin ninguna** restricción es un fallo.
 
 ## Frecuencia máxima (`fmax.sh`)
 
-Implementa a 50 MHz (la frecuencia que ya funciona en la placa) y estima la Fmax con el
-margen de setup: Fmax ≈ 1 / (período − WNS). La estimación sola no alcanza, porque al
-cambiar la restricción cambian la ubicación y el ruteo, así que prueba implementando las
-frecuencias que genera el MMCM, de menor a mayor, hasta un 5 % por encima de la estimación.
-El resultado se fija en `MMCM_MULT` / `MMCM_DIV_X8` de `top_riscv`.
+Sintetiza e implementa el diseño a 60, 70, 80, 90 y 100 MHz, en ese orden, y se detiene en
+la primera frecuencia que no pasa los chequeos de la implementación. Pasos más chicos no
+valen la pena: solo interesa una mejora significativa sobre los 50 MHz que ya funcionan.
+Cada punto se implementa, porque la estimación por el margen de setup
+(1 / (período − WNS)) no alcanza: cada frecuencia produce otra ubicación y otro ruteo.
+
+### Resultados
+
+Primero se probó un barrido fino desde 50 MHz, en pasos de un divisor del MMCM (≈ 0,33 MHz),
+y se lo detuvo en 52,29 MHz: todos los puntos cerraron timing.
+
+| Frecuencia | WNS (ns) | WHS (ns) | Resultado |
+|---|---|---|---|
+| 50,00 MHz | +0,106 | +0,068 | PASS |
+| 50,31 MHz | +0,151 | +0,037 | PASS |
+| 50,63 MHz | +0,638 | +0,036 | PASS |
+| 50,96 MHz | +0,109 | +0,067 | PASS |
+| 51,28 MHz | +0,522 | +0,023 | PASS |
+| 51,61 MHz | +0,716 | +0,018 | PASS |
+| 51,95 MHz | +0,195 | +0,033 | PASS |
+| 52,29 MHz | +0,184 | +0,049 | PASS |
+
+Dos conclusiones:
+- **la estimación por el margen es pesimista**: a 50 MHz el margen de +0,106 ns estimaba
+  una Fmax de 50,3 MHz, y el diseño cerró hasta 52,29 MHz;
+- **el margen varía mucho entre implementaciones** (de +0,1 a +0,7 ns, sin relación con
+  la frecuencia): depende de cómo quedan la ubicación y el ruteo en cada corrida.
+
+Se descartó seguir así: una mejora del 5 % no justifica cambiar la frecuencia. El barrido
+pasó a pasos de 10 MHz:
+
+| Frecuencia | WNS (ns) | WHS (ns) | Resultado |
+|---|---|---|---|
+| 60 MHz | −0,531 | +0,033 | FAIL |
+
+**El sistema se queda en 50 MHz.** A 60 MHz faltan 0,53 ns: el camino crítico tarda
+16,45 ns y el período es de 16,67 ns (sin contar el margen que exige el reloj). Ese camino
+es la cadena completa de un load seguido de un salto que lo usa:
+
+```
+EX/MEM (alu_out) → dmem (RAM distribuida, lectura asíncrona) → forwarding → ALU
+                 → branch_unit → flush_unit → reset de ID/EX
+```
+
+Son 20 niveles de lógica, y el 76 % del retardo es ruteo. Para una mejora significativa
+habría que cortar ese camino en el RTL, por ejemplo con una lectura sincrónica de la dmem
+o resolviendo los saltos una etapa más tarde. Eso cambia el pipeline (y su CPI), así que no
+es un ajuste de frecuencia sino un rediseño, y queda fuera de esta etapa.
 
 ## Decisiones
 
