@@ -35,8 +35,7 @@ bitstream → placa):
 | `implementacion` | STA completo, cruces de reloj, ruteo, DRC | 22/22 |
 | `placa` | la FPGA, programada con ese bitstream: versión, programas y traps iguales a la simulación ciclo a ciclo, comandos | 41/41 |
 
-**Contra un modelo de referencia (golden model).** No hay co-simulación instrucción por
-instrucción con Spike o QEMU porque hay algo más fuerte. riscv-formal compara cada
+**Contra un modelo de referencia (golden model).** riscv-formal compara cada
 instrucción retirada contra la especificación formal de la ISA para **todos** los programas
 posibles, no para los que uno elige correr. Y ACT compara contra Sail, el modelo de
 referencia oficial. El detalle, y por qué hacen falta los dos, está en
