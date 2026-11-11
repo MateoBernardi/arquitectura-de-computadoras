@@ -33,10 +33,7 @@ project_4/
         ├── uart/             ← UART TX + RX con FIFOs
         ├── debug/            ← debug unit (comandos por UART)
         ├── top/              ← top_riscv
-        ├── common/           ← reset y sincronizador
-        ├── pc.v              ← sin usar (resto de TP1)
-        ├── if_stage.v        ← sin usar (resto de TP1)
-        └── riscv_core.v      ← sin usar (resto de TP1, CPU single-cycle)
+        └── common/           ← reset y sincronizador
 ```
 
 **Cada carpeta del RTL tiene su propio `README.md`** con el detalle de sus módulos

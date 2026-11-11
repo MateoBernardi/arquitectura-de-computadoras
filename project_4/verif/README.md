@@ -42,6 +42,12 @@ VARIANTS=1 ./run_all.sh   # además, riscv-formal con cada variante
 cualquier programa? Las otras carpetas prueban contratos de módulos individuales y
 cubren lo que riscv-formal no mira (por ejemplo, el contenido de la memoria).
 
+`forward_unit/` y la prueba `exec` de `datapath/` se superponen con riscv-formal, que ya
+prueba el forwarding y cada instrucción sobre el CPU entero. Se conservan a propósito.
+Son propiedades escritas a mano, cortas y sobre un solo módulo, así que muestran de
+forma directa cómo se arma una verificación formal (especificación, `assert`, `cover`,
+mutantes). Además corren en segundos y, si algo falla, señalan el módulo.
+
 Cada carpeta tiene un `run.sh` que corre todo y compara cada resultado con el esperado:
 
 ```bash

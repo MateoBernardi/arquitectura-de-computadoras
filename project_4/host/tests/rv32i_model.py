@@ -1,4 +1,4 @@
-# Tiny RV32I encoder + reference simulator used to generate the test vectors of tb_pipeline.
+# Tiny RV32I encoder + reference simulator used to generate the test vectors of tb_top_riscv.
 # Usage: python3 rv32i_model.py pipeline_test.s   -> writes pipeline_prog.hex / pipeline_exp.hex
 # (copy them to project_4.srcs/sim_1/new/). exp = x0..x31 then dmem words 0..15.
 import re,sys
