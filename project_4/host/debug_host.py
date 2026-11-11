@@ -21,7 +21,7 @@ Despues de run, usar wait o pause antes de dump. Requiere pyserial.
 import argparse
 import sys
 
-from lib.debug_protocol import DebugLink, ProtocolError, format_dump, read_program
+from lib.debug_protocol import DEFAULT_BAUD, DebugLink, ProtocolError, format_dump, read_program
 
 
 def run_actions(link, actions):
@@ -74,7 +74,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Host de la debug unit del RISC-V", epilog=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", required=True, help="puerto serie (ej. /dev/ttyUSB1 o COM4)")
-    ap.add_argument("--baud", type=int, default=19200, help="baud rate (default 19200)")
+    ap.add_argument("--baud", type=int, default=DEFAULT_BAUD, help=f"baud rate (default {DEFAULT_BAUD})")
     ap.add_argument("actions", nargs="+", help="acciones a ejecutar en orden")
     args = ap.parse_args(argv)
 

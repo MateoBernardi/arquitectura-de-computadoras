@@ -18,7 +18,7 @@ except ImportError:
     sys.exit(1)
 
 from lib.assemble import assemble_file
-from lib.debug_protocol import DebugLink, decode_dump, format_stages
+from lib.debug_protocol import DEFAULT_BAUD, DebugLink, decode_dump, format_stages
 
 
 def auto_detect_port():
@@ -32,7 +32,7 @@ def auto_detect_port():
 def main():
     parser = argparse.ArgumentParser(description="Medición de ciclos de benchmark en la FPGA.")
     parser.add_argument("--port", default=None, help="Puerto serie (ej. /dev/ttyUSB1 o COM3)")
-    parser.add_argument("--baud", type=int, default=19200, help="Baudrate (default: 19200)")
+    parser.add_argument("--baud", type=int, default=DEFAULT_BAUD, help=f"Baudrate (default: {DEFAULT_BAUD})")
     parser.add_argument("--asm", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "programs", "criba.s"), help="Archivo assembly a ejecutar")
     parser.add_argument("--freq-mhz", type=float, default=50.0, help="Frecuencia del core en MHz (default: 50.0)")
     args = parser.parse_args()

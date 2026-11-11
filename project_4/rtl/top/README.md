@@ -42,11 +42,14 @@ unit y el CPU, y maneja el reloj y el reset.
 | Parámetro | Default | Para qué |
 |---|---|---|
 | `CLK_FREQ` | 100_000_000 | frecuencia de `i_clk` |
-| `USE_MMCM` | 1 | 1 → el sistema corre a `CLK_FREQ/2`; 0 → usa `i_clk` directo (simulación) |
-| `BAUD_RATE` | 19_200 | |
+| `USE_MMCM` | 1 | 1 → el sistema corre a `SYS_FREQ`, generada con el MMCM; 0 → usa `i_clk` directo (simulación) |
+| `MMCM_MULT` | 10 | VCO = `CLK_FREQ * MMCM_MULT` (600–1200 MHz en el Artix-7 -1) |
+| `MMCM_DIV_X8` | 160 | divisor de salida × 8 (pasos de 0,125): `SYS_FREQ = VCO / (MMCM_DIV_X8 / 8)` = 50 MHz |
+| `BAUD_RATE` | 19_200 | con el divisor entero, el error es ≤ 0,62 % a cualquier frecuencia ≥ 50 MHz |
 | `N_TICKS` | 16 | sobremuestreo del UART |
 | `PTR_LEN` | 2 | profundidad de los FIFOs (4 palabras) |
 | `IMEM_ADDR_W` | 10 | imem de 1 KB = 256 instrucciones |
+| `BUILD_ID` | 0 | versión del RTL (commit), última palabra del dump; la pasa la síntesis |
 
 ---
 
@@ -59,16 +62,16 @@ sistema corre a **`CLK_FREQ/2` = 50 MHz**, generado con un `MMCME2_BASE`:
 ```verilog
 MMCME2_BASE #(
     .CLKIN1_PERIOD  (1.0e9 / CLK_FREQ),
-    .CLKFBOUT_MULT_F(10.0),        // VCO = CLK_FREQ * 10
-    .CLKOUT0_DIVIDE_F(20.0),       // CLK_FREQ / 2
+    .CLKFBOUT_MULT_F(MMCM_MULT * 1.0),     // VCO = CLK_FREQ * MMCM_MULT
+    .CLKOUT0_DIVIDE_F(MMCM_DIV_X8 / 8.0),  // SYS_FREQ = VCO / divisor
     .DIVCLK_DIVIDE  (1)
 ) u_mmcm (...);
 ```
 
-- El VCO va a 1000 MHz y la salida dividida por 20 → **50 MHz**.
+- Por defecto el VCO va a 1000 MHz y la salida dividida por 20 → **50 MHz**.
 - `BUFG` (`u_fb`, `u_out`) entre el MMCM y el resto del diseño, como pide Vivado.
 - El **baud rate se calcula con la frecuencia interna** (`SYS_FREQ`), no con
-  `CLK_FREQ`, así que el UART sigue funcionando a 19200 baud.
+  `CLK_FREQ`, así que la UART funciona a 19200 baud a cualquier frecuencia del sistema.
 
 Con `USE_MMCM = 0` el reloj es `i_clk` directo: es lo que se usa en simulación.
 

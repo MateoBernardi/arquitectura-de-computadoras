@@ -7,18 +7,25 @@
 //   el CPU recibe su reset desde la debug unit (que incluye el del sistema).
 // - i_rx pasa por sync_2ff antes de uart_core.
 // - LEDs: [0] CPU habilitado, [1] CPU en reset (carga), [2] halt.
-// - Reloj: el camino critico del pipeline (dmem -> forwarding -> ALU -> branch ->
-//   flush) no cierra a 100 MHz (WNS ~ -5 ns post-ruteo). Con USE_MMCM=1 todo el
-//   sistema corre a CLK_FREQ/2 (50 MHz) generado con un MMCM; el baud rate se
-//   calcula con la frecuencia interna. USE_MMCM=0 usa i_clk directo (simulacion).
+// - Reloj: con USE_MMCM=1 todo el sistema corre a la frecuencia que genera el MMCM:
+//     SYS_FREQ = CLK_FREQ * MMCM_MULT / (MMCM_DIV_X8 / 8)
+//   (VCO = CLK_FREQ * MMCM_MULT, entre 600 y 1200 MHz en el Artix-7 -1; el divisor
+//   de salida va en pasos de 0.125, por eso se pasa multiplicado por 8). Por defecto,
+//   100 MHz * 10 / 20 = 50 MHz. El baud rate se calcula con SYS_FREQ. USE_MMCM=0 usa
+//   i_clk directo (simulacion RTL).
+// - Version: la ultima palabra del dump (la 89) es BUILD_ID. La sintesis le pasa el
+//   commit del RTL, asi el host sabe que bitstream esta cargado en la placa.
 // -----------------------------------------------------------------------------
 module top_riscv #(
     parameter CLK_FREQ    = 100_000_000,     // frecuencia de i_clk
-    parameter USE_MMCM    = 1,               // 1: sistema a CLK_FREQ/2
+    parameter USE_MMCM    = 1,               // 1: sistema a SYS_FREQ (MMCM)
+    parameter MMCM_MULT   = 10,              // VCO = CLK_FREQ * MMCM_MULT
+    parameter MMCM_DIV_X8 = 160,             // divisor de salida * 8 (160 = 20.0)
     parameter BAUD_RATE   = 19_200,
     parameter N_TICKS     = 16,
     parameter PTR_LEN     = 2,
-    parameter IMEM_ADDR_W = 10                 // 1 KB = 256 instrucciones
+    parameter IMEM_ADDR_W = 10,                // 1 KB = 256 instrucciones
+    parameter [31:0] BUILD_ID = 32'h0          // version del RTL (commit); 0 = sin version
 ) (
     input  wire       i_clk,
     input  wire       i_reset,
@@ -26,7 +33,9 @@ module top_riscv #(
     output wire       o_tx,
     output wire [2:0] o_led
 );
-    localparam SYS_FREQ = USE_MMCM ? CLK_FREQ / 2 : CLK_FREQ;
+    // en kHz para no desbordar 32 bits: 100_000 * 10 * 8 cabe holgado
+    localparam integer SYS_FREQ = USE_MMCM ? (CLK_FREQ / 1000 * MMCM_MULT * 8 / MMCM_DIV_X8) * 1000
+                                           : CLK_FREQ;
 
     wire clk, locked;
     wire sys_reset, rx_sync;
@@ -36,8 +45,8 @@ module top_riscv #(
             wire clk_fb, clk_fb_buf, clk_out, clk_out_buf;
             MMCME2_BASE #(
                 .CLKIN1_PERIOD  (1.0e9 / CLK_FREQ),
-                .CLKFBOUT_MULT_F(10.0),                // VCO = CLK_FREQ * 10
-                .CLKOUT0_DIVIDE_F(20.0),               // CLK_FREQ / 2
+                .CLKFBOUT_MULT_F(MMCM_MULT * 1.0),     // VCO = CLK_FREQ * MMCM_MULT
+                .CLKOUT0_DIVIDE_F(MMCM_DIV_X8 / 8.0),  // SYS_FREQ = VCO / divisor
                 .DIVCLK_DIVIDE  (1)
             ) u_mmcm (
                 .CLKIN1(i_clk), .CLKFBIN(clk_fb_buf), .CLKFBOUT(clk_fb),
@@ -64,8 +73,8 @@ module top_riscv #(
     wire                   imem_we;
     wire [IMEM_ADDR_W-1:0] imem_waddr;
     wire [7:0]             imem_wdata;
-    wire [15:0]            dbg_addr, dbg_count;
-    wire [31:0]            dbg_data;
+    wire [15:0]            dbg_addr, dbg_count, cpu_dbg_count;
+    wire [31:0]            dbg_data, cpu_dbg_data;
 
     reset_gen u_reset (
         .i_clk      (clk),
@@ -134,9 +143,13 @@ module top_riscv #(
         .i_imem_waddr(imem_waddr),
         .i_imem_wdata(imem_wdata),
         .i_dbg_addr  (dbg_addr),
-        .o_dbg_data  (dbg_data),
-        .o_dbg_count (dbg_count)
+        .o_dbg_data  (cpu_dbg_data),
+        .o_dbg_count (cpu_dbg_count)
     );
+
+    // Bus de debug: las palabras del CPU y, al final, BUILD_ID
+    assign dbg_count = cpu_dbg_count + 16'd1;
+    assign dbg_data  = (dbg_addr == cpu_dbg_count) ? BUILD_ID : cpu_dbg_data;
 
     assign o_led = {cpu_halt, cpu_reset, cpu_enable};
 endmodule

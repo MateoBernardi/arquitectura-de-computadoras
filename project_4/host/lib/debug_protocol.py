@@ -8,8 +8,9 @@ Protocolo (ver rtl/debug/debug_unit.v):
     'D' -> count_lo count_hi + count palabras de 32 bits LE (bus de debug)
     'H' espontaneo cuando el CPU llega a halt durante 'R'.
 
-Mapa del dump: encabezado de riscv_pipeline.v. Si se agregan palabras, se agregan
-siempre al final y se extiende decode_dump().
+Mapa del dump: palabras 0..88 en el encabezado de riscv_pipeline.v; la 89 es BUILD_ID
+(top_riscv.v), la version del RTL cargado. Si se agregan palabras, se agregan siempre al
+final y se extiende decode_dump().
 """
 
 CMD_LOAD, CMD_STEP, CMD_RUN, CMD_PAUSE, CMD_RESET, CMD_DUMP = b"L", b"S", b"R", b"P", b"X", b"D"
@@ -19,6 +20,8 @@ DBG_REGS = 22
 DBG_DMEM = 54
 DBG_DMEM_WORDS = 32
 DBG_TRAP = DBG_DMEM + DBG_DMEM_WORDS   # causa, pc y valor del trap (3 palabras)
+DBG_BUILD = DBG_TRAP + 3               # version del RTL (commit), 0 = sin version
+DEFAULT_BAUD = 19200
 
 # Por qué se detuvo el CPU: códigos estándar de excepción (mcause). Ver riscv_pipeline.v.
 TRAP_CAUSES = {
@@ -202,6 +205,8 @@ def decode_dump(w):
         "trap": ({"cause": w[DBG_TRAP], "pc": w[DBG_TRAP + 1], "tval": w[DBG_TRAP + 2],
                   "name": TRAP_CAUSES.get(w[DBG_TRAP], "?")}
                  if len(w) >= DBG_TRAP + 3 else None),
+        # None si el bitstream es anterior a la palabra de version
+        "build": w[DBG_BUILD] if len(w) > DBG_BUILD else None,
     }
 
 
@@ -285,10 +290,17 @@ def format_stages(d):
     return "\n".join(out)
 
 
+def format_build(b):
+    """Texto de la version del RTL cargado (b = decode_dump(...)["build"])."""
+    if b is None:
+        return "RTL: sin palabra de version (bitstream anterior)"
+    return "RTL: sin version (sintetizado con cambios sin commitear)" if b == 0 else f"RTL: commit {b:08x}"
+
+
 def format_dump(words):
     """Texto legible del dump completo (para la CLI)."""
     d = decode_dump(words)
-    out = [format_stages(d)]
+    out = [format_build(d["build"]), format_stages(d)]
     if d["mem_wb"]["halt"]:
         out.append(format_trap(d["trap"]))
     out.append("Registros")

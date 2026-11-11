@@ -19,12 +19,14 @@ module tb_top_riscv;
     localparam integer CAP_WORDS   = 1 << (IMEM_ADDR_W - 2);
     localparam integer RX_TIMEOUT  = 40 * 10 * BIT_CLKS;
     localparam [31:0]  NOP         = 32'h0000_0013;
-    // Bus de debug de riscv_pipeline (ver encabezado): 22 palabras de etapas, 32 registros,
-    // 32 de dmem y 3 del trap (causa, pc, valor)
-    localparam integer DBG_REGS_AT = 22;
-    localparam integer DBG_DMEM_AT = 54;
-    localparam integer DBG_TRAP_AT = 86;
-    localparam integer DBG_NWORDS  = 89;
+    // Bus de debug (ver encabezado de riscv_pipeline.v): 22 palabras de etapas, 32 registros,
+    // 32 de dmem, 3 del trap (causa, pc, valor) y, agregada por top_riscv, la version
+    localparam integer DBG_REGS_AT  = 22;
+    localparam integer DBG_DMEM_AT  = 54;
+    localparam integer DBG_TRAP_AT  = 86;
+    localparam integer DBG_BUILD_AT = 89;
+    localparam integer DBG_NWORDS   = 90;
+    localparam [31:0]  BUILD_ID     = 32'hC0DE_0089;   // valor de prueba: llega intacto al dump
 
     reg        clk = 1'b0;
     reg        rst_btn;
@@ -41,7 +43,8 @@ module tb_top_riscv;
         .USE_MMCM   (0),
         .BAUD_RATE  (BAUD_RATE),
         .N_TICKS    (N_TICKS),
-        .IMEM_ADDR_W(IMEM_ADDR_W)
+        .IMEM_ADDR_W(IMEM_ADDR_W),
+        .BUILD_ID   (BUILD_ID)
     ) dut (
         .i_clk  (clk),
         .i_reset(rst_btn),
@@ -219,6 +222,12 @@ module tb_top_riscv;
                 $display("FAIL t=%0t: dump n=%0d pc=%h, esperado pc=%h", $time, dcount, dw[0], pc);
             end
             else $display("OK   dump pc=%h", dw[0]);
+            checks = checks + 1;
+            if (dw[DBG_BUILD_AT] !== BUILD_ID) begin
+                errors = errors + 1;
+                $display("FAIL version = %h, esperada %h", dw[DBG_BUILD_AT], BUILD_ID);
+            end
+            else $display("OK   version = %h", dw[DBG_BUILD_AT]);
         end
     endtask
 

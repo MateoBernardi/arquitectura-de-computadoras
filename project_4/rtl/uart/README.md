@@ -60,8 +60,8 @@ Genera un **tick** por bit (con sobremuestreo).
 **Entradas**: `i_clk`, `i_reset`
 **Salidas**: `o_tick` — un pulso por cada `N_TICKS` de reloj.
 
-**Cálculo**: `MODULUS = CLK_FREQ / (BAUD_RATE * N_TICKS)`. Con 100 MHz, 19200 baud y
-16 ticks → `MODULUS = 325`. El contador de `MODULUS` se recorta con
+**Cálculo**: `MODULUS = CLK_FREQ / (BAUD_RATE * N_TICKS)`. Con 50 MHz, 19200 baud y
+16 ticks → `MODULUS = 162` (162,8 truncado: 0,47 % de error). El contador de `MODULUS` se recorta con
 `CLK_FREQ/(BAUD_RATE*4)` para el caso de 1 tick.
 
 ---

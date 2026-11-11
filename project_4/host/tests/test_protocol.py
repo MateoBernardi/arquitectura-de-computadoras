@@ -83,6 +83,16 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(dp.format_trap({"cause": 3, "pc": 8, "tval": 0, "name": "ebreak"}),
                          "Halt: ebreak (causa 3) en pc=0x00000008")
 
+    def test_decode_build(self):
+        w = [0] * (dp.DBG_BUILD + 1)
+        w[dp.DBG_BUILD] = 0x6b49573a
+        d = dp.decode_dump(w)
+        self.assertEqual(d["build"], 0x6b49573a)
+        self.assertEqual(dp.format_build(d["build"]), "RTL: commit 6b49573a")
+        self.assertIn("RTL: commit 6b49573a", dp.format_dump(w))
+        self.assertIsNone(dp.decode_dump(w[:dp.DBG_BUILD])["build"])
+        self.assertIn("sin version", dp.format_build(0))
+
     def test_disasm_roundtrip(self):
         src = open(os.path.join(PROJ, "programs", "pipeline_test.s")).read()
         words, lines = model.assemble(src)

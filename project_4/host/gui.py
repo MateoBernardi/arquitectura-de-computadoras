@@ -24,7 +24,7 @@ except Exception:                       # sin Pillow -> solapas planas
     _HAS_PIL = False
 
 from lib.assemble import AssemblerError, INSTALL_HINT, assemble_text, hex_listing
-from lib.debug_protocol import ABI, DebugLink, ProtocolError, decode_dump, disasm, format_stages, format_trap
+from lib.debug_protocol import ABI, DEFAULT_BAUD, DebugLink, ProtocolError, decode_dump, disasm, format_stages, format_trap
 
 IMEM_WORDS = 256                      # 2**IMEM_ADDR_W / 4 (top_riscv.v)
 SAMPLE = """# Suma 1..5 en x2 y la guarda en dmem[0]
@@ -420,7 +420,7 @@ class App:
         RoundedButton(top, text="↻", width=3, command=lambda: self.port.config(values=self._ports())).pack(side="left")
         ttk.Label(top, text="Baud").pack(side="left", padx=(8, 0))
         self.baud = ttk.Entry(top, width=7)
-        self.baud.insert(0, "19200")
+        self.baud.insert(0, str(DEFAULT_BAUD))
         self.baud.pack(side="left", padx=4)
         self.btn_conn = RoundedButton(top, text="Conectar", command=self.toggle_connect)
         self.btn_conn.pack(side="left", padx=4)
