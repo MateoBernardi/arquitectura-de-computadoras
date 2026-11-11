@@ -11,10 +11,11 @@ Diagramas: entradas a la izquierda y salidas a la derecha, con su ancho en bits.
 clk           1 ──▶│                      │──▶ o_halt       1  R
 i_rst         1 ──▶│                      │──▶ o_dbg_data  32  C
 i_enable      1 ──▶│    riscv_pipeline    │──▶ o_dbg_count 16  C
-i_imem_we     1 ──▶│     [secuencial]     │
-i_imem_waddr 10 ──▶│                      │
-i_imem_wdata  8 ──▶│                      │
-i_dbg_addr   16 ──▶│                      │
+i_imem_we     1 ──▶│     [secuencial]     │──▶ o_eventos    5  C
+i_imem_waddr 10 ──▶│                      │──▶ o_wb_we      1  C
+i_imem_wdata  8 ──▶│                      │──▶ o_wb_rd      5  R
+i_dbg_addr   16 ──▶│                      │──▶ o_wb_data   32  R
+                   │                      │
                    └──────────────────────┘
 ```
 
@@ -25,6 +26,8 @@ i_dbg_addr   16 ──▶│                      │
 | `o_halt` | 1 cuando la instrucción que detiene el CPU (`ebreak`, `ecall` o un trap) llega a WB. En ese momento todo lo anterior ya se retiró, la instrucción que lo detuvo no escribió nada y ninguna posterior se ejecutó |
 | `i_imem_*` | el puerto de escritura de la imem, para cargar el programa (lo usa la debug unit con el CPU en reset) |
 | `i_dbg_addr` / `o_dbg_data` | el bus de debug: una dirección elige una palabra del estado interno (ver abajo); `o_dbg_count` es la cantidad de palabras (constante, 89) |
+| `o_eventos` | lo que hace el pipeline en este ciclo, para los LEDs de la placa: `[0]` forwarding al operando A, `[1]` al B (solo si la instrucción en EX usa ese operando: en los formatos I, U y J esos bits son parte del inmediato), `[2]` stall de load-use, `[3]` flush por un salto tomado, `[4]` detenido por una excepción (un trap que no es `ecall` ni `ebreak`; nivel, hasta el reset) |
+| `o_wb_*` | la escritura en el banco de registros de este ciclo: `o_wb_we` = 1 si la instrucción en WB escribe algún x1..x31, en `o_wb_rd`, el valor `o_wb_data`. Para el display |
 
 | Parámetro | En el sistema | Para qué |
 |---|---|---|

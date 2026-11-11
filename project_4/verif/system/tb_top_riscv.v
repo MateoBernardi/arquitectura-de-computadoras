@@ -32,7 +32,10 @@ module tb_top_riscv;
     reg        rst_btn;
     reg        rx_line;                                // host -> FPGA
     wire       tx_line;                                // FPGA -> host
-    wire [2:0] led;
+    wire [15:0] led;
+    reg         sw_display = 1'b1;
+    wire [7:0]  an;
+    wire [6:0]  seg;
 
     integer    errors, checks, framing_errors;
     integer    i, n;
@@ -50,7 +53,10 @@ module tb_top_riscv;
         .i_reset(rst_btn),
         .i_rx   (rx_line),
         .o_tx   (tx_line),
-        .o_led  (led)
+        .i_sw   (sw_display),
+        .o_led  (led),
+        .o_an   (an),
+        .o_seg  (seg)
     );
 
     always #5 clk = ~clk;
@@ -300,6 +306,18 @@ module tb_top_riscv;
         end
     endtask
 
+    // chequeo genérico de un valor observado (LEDs, display)
+    task expect_val(input [8*80-1:0] what, input [31:0] got, input [31:0] want);
+        begin
+            checks = checks + 1;
+            if (got !== want) begin
+                errors = errors + 1;
+                $display("FAIL %0s = %h, esperado %h", what, got, want);
+            end else
+                $display("OK   %0s = %h", what, got);
+        end
+    endtask
+
     // ---------------------------------------------------------------- secuencia
     integer prog_len;
     initial begin
@@ -335,6 +353,18 @@ module tb_top_riscv;
         expect_led(0, 1'b0);
         check_state;
         expect_trap(32'd3, ebreak_pc(prog_len));               // causa 3 = ebreak
+        expect_led(15, 1'b1);                          // halt (LD15)
+        expect_led(14, 1'b0);                          // ebreak no es una excepción de error
+        // display: la última escritura del programa es el valor final de ese registro
+        expect_val("display: registro de la ultima escritura != 0", dut.ultimo_rd != 0, 1);
+        expect_val("display: valor = el registro en el dump", dut.ultimo_valor,
+                   dw[DBG_REGS_AT + dut.ultimo_rd]);
+        expect_val("LEDs 7..3 = registro de la ultima escritura (display prendido)", led[7:3],
+                   dut.ultimo_rd);
+        sw_display = 1'b0;
+        repeat (4) @(posedge clk);
+        expect_val("LEDs 7..3 apagados con el display apagado", led[7:3], 0);
+        sw_display = 1'b1;
         uart_send("S");
         expect_reply("H");                             // sigue en halt
 
@@ -356,6 +386,10 @@ module tb_top_riscv;
         expect_reply("K");
         expect_led(0, 1'b1);
         repeat (300) @(posedge clk);
+        // jal x0,0 en bucle: cada vuelta hace un flush; no hay loads ni forwarding
+        expect_val("LED flush: visto corriendo", dut.u_led_ev.visto[3], 1);
+        expect_val("LED stall: no visto", dut.u_led_ev.visto[2], 0);
+        expect_val("LED forwarding A: no visto", dut.u_led_ev.visto[0], 0);
         uart_send("P");
         expect_reply("K");
         expect_led(0, 1'b0);
@@ -373,6 +407,15 @@ module tb_top_riscv;
         expect_reply("K");
         expect_reply("H");
         expect_trap(32'd2, 32'h4);                     // causa 2 = ilegal, en pc 4
+        expect_led(14, 1'b1);                          // excepción (LD14)
+        expect_led(15, 1'b1);
+        expect_val("display: registro de la ultima escritura (x1)", dut.ultimo_rd, 1);
+        expect_val("display: valor de la ultima escritura", dut.ultimo_valor, 1);
+        // el display multiplexado: dígito 0 = "1", dígito 1 = "0" (segmentos activos en bajo)
+        wait (an == 8'b1111_1110) @(posedge clk);
+        expect_val("display: digito 0 muestra 1 (segmentos gfedcba, activos en bajo)", seg, 7'b1111001);
+        wait (an == 8'b1111_1101) @(posedge clk);
+        expect_val("display: digito 1 muestra 0", seg, 7'b1000000);
         checks = checks + 1;
         if (dw[DBG_REGS_AT + 1] !== 32'd1 || dw[DBG_REGS_AT + 2] !== 32'd0) begin
             errors = errors + 1;

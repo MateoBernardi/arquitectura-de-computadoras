@@ -9,6 +9,14 @@
 //  - i_rst    : synchronous reset (PC=0, pipeline emptied, x1..x31 cleared).
 //               dmem is NOT cleared. imem is kept.
 //  - i_enable : 0 freezes every state element (no clock gating).
+//  - o_eventos: what the pipeline does in this cycle, for the board LEDs
+//               (combinational): [0] forwarding to operand A, [1] to operand B
+//               (only when the instruction in EX really uses that operand),
+//               [2] load-use stall, [3] flush by a taken branch/jump (redirect),
+//               [4] stopped by an exception (o_halt with a cause other than
+//               ECALL/EBREAK; level, until reset).
+//  - o_wb_*   : the register write of this cycle (we = 1 when the instruction in
+//               WB writes some x1..x31): for the display.
 //  - o_halt   : level, 1 when an instruction that stops execution reaches WB:
 //               ECALL, EBREAK or a fatal trap. Everything older has retired,
 //               the instruction itself wrote nothing, and nothing younger was
@@ -66,7 +74,12 @@ module riscv_pipeline #(
     // debug bus
     input  wire [15:0]            i_dbg_addr,
     output reg  [31:0]            o_dbg_data,
-    output wire [15:0]            o_dbg_count
+    output wire [15:0]            o_dbg_count,
+    // observation (board LEDs and display)
+    output wire [4:0]             o_eventos,
+    output wire                   o_wb_we,
+    output wire [4:0]             o_wb_rd,
+    output wire [31:0]            o_wb_data
 );
     localparam [15:0] DBG_REGS       = 16'd22;
     localparam [15:0] DBG_DMEM       = DBG_REGS + 16'd32;
@@ -358,6 +371,18 @@ module riscv_pipeline #(
     );
 
     assign o_halt = wb_halt;
+
+    // ---------------------------------------------------------- observation
+    // forwarding that is actually used: an operand field that the instruction does not
+    // read (immediate bits in I/U/J formats) may match a destination by chance
+    wire ex_uses_rs1 = ~ex_is_auipc & ~(ex_jump & ~ex_is_jalr) & (ex_wb_sel != 2'b11) & ~ex_halt;
+    wire ex_uses_rs2 = (~ex_alu_src & ~ex_jump & (ex_wb_sel != 2'b11) & ~ex_halt) | ex_mem_write;
+    wire halt_exc    = wb_halt & (trap_cause != 4'd3) & (trap_cause != 4'd11);
+    assign o_eventos = {halt_exc, redirect, stall,
+                        ex_uses_rs2 & (forward_b != 2'b00), ex_uses_rs1 & (forward_a != 2'b00)};
+    assign o_wb_we   = wb_reg_write & (wb_rd != 5'd0);
+    assign o_wb_rd   = wb_rd;
+    assign o_wb_data = wb_result;
 
     // ---------------------------------------------------------------- debug
     wire [31:0] dbg_idex_ctrl  = {17'd0, ex_alu_op, ex_wb_sel, ex_alu_src, ex_halt, ex_is_auipc,

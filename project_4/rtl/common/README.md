@@ -1,7 +1,7 @@
 # `common/` — reset y sincronización
 
 Dos bloques chicos que resuelven el mismo problema: las señales que llegan de afuera de
-la FPGA (el botón de reset, la línea RX de la UART) no tienen relación de fase con el
+la FPGA (el botón de reset, la línea RX de la UART, el switch del display) no tienen relación de fase con el
 reloj. Si entraran directo a la lógica, un flip-flop podría muestrearlas justo mientras
 cambian y quedar en un estado intermedio (metaestabilidad). Estos módulos las pasan al
 dominio del reloj del sistema antes de que las use nadie.
@@ -27,7 +27,7 @@ i_async 1 ──▶│       sync_2ff       │
 |---|---|---|
 | `INIT` | 0 | valor inicial de los flip-flops; la línea RX usa 1 (en reposo, una UART está en 1) |
 
-Lo usan `top_riscv` (para `i_rx`) y `reset_gen` (para el botón). La salida llega dos
+Lo usan `top_riscv` (para `i_rx` e `i_sw`) y `reset_gen` (para el botón). La salida llega dos
 ciclos después que la entrada.
 
 ## `reset_gen` — reset del sistema

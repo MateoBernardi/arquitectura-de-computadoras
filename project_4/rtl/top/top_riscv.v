@@ -6,7 +6,12 @@
 // - reset_gen: power-on reset + boton sincronizado. Resetea UART y debug unit;
 //   el CPU recibe su reset desde la debug unit (que incluye el del sistema).
 // - i_rx pasa por sync_2ff antes de uart_core.
-// - LEDs: [0] CPU habilitado, [1] CPU en reset (carga), [2] halt.
+// - LEDs (ver README.md): [0] CPU habilitado, [1] CPU en reset (carga), [2] halt,
+//   [7:3] registro de la última escritura (con el display prendido), [10] forwarding
+//   al operando A, [11] al B, [12] stall, [13] flush por salto, [14] excepción,
+//   [15] halt. Los de eventos (led_eventos) quedan prendidos ~60 ms para que se vean.
+// - i_sw[0] prende el display: muestra en hex el valor que escribió en su registro
+//   la última instrucción que escribió uno (y su número en los LEDs 7..3).
 // - Reloj: con USE_MMCM=1 todo el sistema corre a la frecuencia que genera el MMCM:
 //     SYS_FREQ = CLK_FREQ * MMCM_MULT / (MMCM_DIV_X8 / 8)
 //   (VCO = CLK_FREQ * MMCM_MULT, entre 600 y 1200 MHz en el Artix-7 -1; el divisor
@@ -31,7 +36,10 @@ module top_riscv #(
     input  wire       i_reset,
     input  wire       i_rx,
     output wire       o_tx,
-    output wire [2:0] o_led
+    input  wire [0:0] i_sw,
+    output wire [15:0] o_led,
+    output wire [7:0] o_an,
+    output wire [6:0] o_seg
 );
     // en kHz para no desbordar 32 bits: 100_000 * 10 * 8 cabe holgado
     localparam integer SYS_FREQ = USE_MMCM ? (CLK_FREQ / 1000 * MMCM_MULT * 8 / MMCM_DIV_X8) * 1000
@@ -132,6 +140,11 @@ module top_riscv #(
         .i_dbg_count        (dbg_count)
     );
 
+    wire [4:0]  cpu_eventos;
+    wire        cpu_wb_we;
+    wire [4:0]  cpu_wb_rd;
+    wire [31:0] cpu_wb_data;
+
     riscv_pipeline #(
         .IMEM_ADDR_W(IMEM_ADDR_W)
     ) u_cpu (
@@ -144,12 +157,50 @@ module top_riscv #(
         .i_imem_wdata(imem_wdata),
         .i_dbg_addr  (dbg_addr),
         .o_dbg_data  (cpu_dbg_data),
-        .o_dbg_count (cpu_dbg_count)
+        .o_dbg_count (cpu_dbg_count),
+        .o_eventos   (cpu_eventos),
+        .o_wb_we     (cpu_wb_we),
+        .o_wb_rd     (cpu_wb_rd),
+        .o_wb_data   (cpu_wb_data)
     );
 
     // Bus de debug: las palabras del CPU y, al final, BUILD_ID
     assign dbg_count = cpu_dbg_count + 16'd1;
     assign dbg_data  = (dbg_addr == cpu_dbg_count) ? BUILD_ID : cpu_dbg_data;
 
-    assign o_led = {cpu_halt, cpu_reset, cpu_enable};
+    // --- LEDs y display -------------------------------------------------------------
+    // eventos del pipeline: forwarding A/B, stall y flush duran un ciclo, así que se
+    // estiran; la excepción y el halt son niveles
+    wire [3:0] led_ev;
+    // se limpia también con el reset del CPU: al cargar otro programa no quedan
+    // eventos del anterior
+    led_eventos #(.N(4)) u_led_ev (
+        .i_clk(clk), .i_reset(sys_reset | cpu_reset), .i_en(cpu_enable),
+        .i_ev(cpu_eventos[3:0]), .o_led(led_ev)
+    );
+
+    // la última escritura en el banco de registros (en un ciclo en que el CPU avanzó)
+    reg [4:0]  ultimo_rd;
+    reg [31:0] ultimo_valor;
+    always @(posedge clk) begin
+        if (sys_reset || cpu_reset) begin
+            ultimo_rd    <= 5'd0;
+            ultimo_valor <= 32'd0;
+        end else if (cpu_enable && cpu_wb_we) begin
+            ultimo_rd    <= cpu_wb_rd;
+            ultimo_valor <= cpu_wb_data;
+        end
+    end
+
+    wire sw_display;
+    sync_2ff u_sw_sync (.i_clk(clk), .i_async(i_sw[0]), .o_sync(sw_display));
+
+    display_7seg u_display (
+        .i_clk(clk), .i_on(sw_display), .i_valor(ultimo_valor),
+        .o_an(o_an), .o_seg(o_seg)
+    );
+
+    assign o_led = {cpu_halt, cpu_eventos[4], led_ev, 2'b00,
+                    sw_display ? ultimo_rd : 5'd0,
+                    cpu_halt, cpu_reset, cpu_enable};
 endmodule
