@@ -1,7 +1,8 @@
 # verif/ — verificación del proyecto
 
-Sigue el flujo RTL → sistema → síntesis → implementación → bitstream → placa. Para el
-RTL usa herramientas libres (Yosys, SymbiYosys, solvers SMT,
+Sigue las 5 etapas del flujo: RTL → síntesis → implementación → bitstream → placa. Son 9
+capas de prueba repartidas en esas etapas, más una para el software del host: 10 en total
+(ver la tabla de capas más abajo). Para el RTL usa herramientas libres (Yosys, SymbiYosys, solvers SMT,
 [riscv-formal](https://github.com/YosysHQ/riscv-formal), Verilator, Icarus,
 riscv-arch-test); Vivado solo hace falta para las etapas de FPGA.
 
@@ -41,20 +42,23 @@ si alguna quedó en SKIP). Los reportes quedan en `build/reports/` (de `project_
 `<capa>.log` con la salida completa y `resumen.md` con la tabla de resultados, el commit
 y las versiones de las herramientas. Todo lo generado va a `build/`.
 
-| Capa | Qué prueba |
-|---|---|
-| `formal` | propiedades formales por módulo (forward_unit, hazard_unit, pipeline_control, datapath), con mutantes |
-| `rvfi` | el CPU completo contra la ISA RV32I con riscv-formal, incluidas las excepciones, con mutantes |
-| `act` | la suite oficial riscv-arch-test, autoverificada contra Sail: las instrucciones RV32I |
-| `traps` | tests propios: causa y PC que reporta cada trap (ACT, sin CSRs, no prueba excepciones) |
-| `rendimiento` | ciclos y CPI del diseño base y de cada variante; cada variante tiene que dar el mismo resultado |
-| `sistema` | el sistema completo (UART + debug unit + CPU), manejado por la línea serie |
-| `host` | el software de la PC: protocolo, desensamblador y GUI |
-| `sintesis` | Vivado: el netlist es lo que pide el RTL (avisos justificados, sin latches, memorias), con mutantes |
-| `implementacion` | Vivado: STA completo (nada sin restringir; setup, hold, pulso), cruces de reloj, ruteo, DRC |
-| `placa` | programa la FPGA con el bitstream verificado y la prueba por la UART: versión, programas y traps comparados contra la simulación, comandos de la debug unit ([`placa/README.md`](placa/README.md)) |
+| Etapa | Capa | Qué prueba |
+|---|---|---|
+| RTL | `formal` | propiedades formales por módulo (forward_unit, hazard_unit, pipeline_control, datapath), con mutantes |
+| RTL | `rvfi` | el CPU completo contra la ISA RV32I con riscv-formal, incluidas las excepciones, con mutantes |
+| RTL | `act` | la suite oficial riscv-arch-test, autoverificada contra Sail: las instrucciones RV32I |
+| RTL | `traps` | tests propios: causa y PC que reporta cada trap (ACT, sin CSRs, no prueba excepciones) |
+| RTL | `rendimiento` | ciclos y CPI del diseño base y de cada variante; cada variante tiene que dar el mismo resultado |
+| RTL | `sistema` | el sistema completo (UART + debug unit + CPU), manejado por la línea serie |
+| síntesis | `sintesis` | Vivado: el netlist es lo que pide el RTL (avisos justificados, sin latches, memorias), con mutantes |
+| implementación | `implementacion` | Vivado: STA completo (nada sin restringir; setup, hold, pulso), cruces de reloj, ruteo, DRC |
+| placa | `placa` | genera el bitstream, programa la FPGA y la prueba por la UART: versión, programas y traps comparados contra la simulación, comandos de la debug unit ([`placa/README.md`](placa/README.md)) |
+| fuera del flujo | `host` | el software de la PC: protocolo, desensamblador y GUI |
 
-Las capas de FPGA, y por qué no hay simulación de netlist ni capa de bitstream, están en
+La etapa de bitstream no tiene capa propia: el bitstream se genera dentro de `placa`, y
+`placa` controla con `BUILD_ID` que corresponda al commit. `host` prueba el software de
+la PC, que no pasa por el flujo. Las capas de FPGA, y por qué no hay simulación de netlist,
+están en
 [`fpga/README.md`](fpga/README.md).
 
 ## Qué se verifica

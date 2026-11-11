@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Verificación del proyecto por capas, en el orden del flujo:
-#   RTL (formal, rvfi, act, traps, rendimiento) → sistema → host → síntesis → implementación
-#   → placa (la FPGA tiene que estar programada con el bitstream del commit que se prueba)
+# Verificación del proyecto por capas, en el orden de las etapas del flujo:
+#   RTL (formal, rvfi, act, traps, rendimiento, sistema) → síntesis (sintesis)
+#   → implementación (implementacion) → bitstream (sin capa: se genera en placa)
+#   → placa (placa). host prueba el software de la PC, fuera del flujo.
 #
 #   ./run.sh                     todas las capas
 #   ./run.sh act traps           solo esas capas
