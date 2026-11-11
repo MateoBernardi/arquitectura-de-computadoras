@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Compila el simulador con Verilator.
 #   ./build.sh                       diseño base        → build/sim/base/Vtb
-#   ./build.sh hazard_unit_nostall   con una variante   → build/sim/hazard_unit_nostall/Vtb
+#   ./build.sh hazard_unit_precise   con una variante   → build/sim/hazard_unit_precise/Vtb
 # (build/ es la de project_4/)
 #   ./build.sh placa                 diseño base con las memorias de la placa (1 KB)
 #                                    → build/sim/placa/Vtb (lo usa verif/placa)

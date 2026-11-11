@@ -64,7 +64,7 @@ etapa a la vez están en [`flow/`](flow/README.md):
 | Situación | Qué hace el pipeline | Costo | Quién lo decide |
 |---|---|---|---|
 | una instrucción usa un resultado que todavía no se escribió | lo reenvía desde EX/MEM o MEM/WB (forwarding) | 0 ciclos | `forward_unit` |
-| una instrucción usa el dato de un load que está en EX | frena IF e ID un ciclo (stall) | 1 ciclo | `hazard_unit` |
+| una instrucción usa el dato de un load que está en EX | frena IF e ID un ciclo (stall); el dato le llega desde MEM/WB | 1 ciclo | `hazard_unit` |
 | un salto tomado (branch, JAL, JALR) | descarta las 2 instrucciones que entraron detrás | 2 ciclos | `flush_unit` |
 | una excepción, `ecall` o `ebreak` | la instrucción no escribe nada, nada posterior se ejecuta, y el CPU se detiene al llegar a WB | — | `trap_unit`, `illegal_check` |
 

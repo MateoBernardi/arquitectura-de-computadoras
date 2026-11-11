@@ -12,7 +12,7 @@ unit, que habla con la UART de a bytes y nunca ve los bits.
 ```
 
 **Por qué las colas:** la debug unit y la línea serie trabajan a ritmos muy distintos
-(un byte por la línea tarda unos 26 000 ciclos a 50 MHz). Las colas desacoplan los dos
+(un byte por la línea tarda unos 36 000 ciclos a 70 MHz). Las colas desacoplan los dos
 lados: la debug unit deja un byte en la cola de TX y sigue; los bytes que llegan esperan
 en la cola de RX hasta que la debug unit los lee.
 
@@ -40,7 +40,7 @@ termina un byte toma el siguiente, así que los bytes encolados salen uno detrá
 
 | Parámetro | En el sistema | Para qué |
 |---|---|---|
-| `CLK_FREQ` | `SYS_FREQ` (50 MHz) | frecuencia del reloj, para calcular el baud rate |
+| `CLK_FREQ` | `SYS_FREQ` (70 MHz) | frecuencia del reloj, para calcular el baud rate |
 | `BAUD_RATE` | 19200 | velocidad de la línea |
 | `NB_DATA` | 8 | bits por dato |
 | `N_TICKS` | 16 | muestras por bit (sobremuestreo) |

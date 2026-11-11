@@ -11,7 +11,7 @@
 //     SYS_FREQ = CLK_FREQ * MMCM_MULT / (MMCM_DIV_X8 / 8)
 //   (VCO = CLK_FREQ * MMCM_MULT, entre 600 y 1200 MHz en el Artix-7 -1; el divisor
 //   de salida va en pasos de 0.125, por eso se pasa multiplicado por 8). Por defecto,
-//   100 MHz * 10 / 20 = 50 MHz. El baud rate se calcula con SYS_FREQ. USE_MMCM=0 usa
+//   100 MHz * 7 / 10 = 70 MHz. El baud rate se calcula con SYS_FREQ. USE_MMCM=0 usa
 //   i_clk directo (simulacion RTL).
 // - Version: la ultima palabra del dump (la 89) es BUILD_ID. La sintesis le pasa el
 //   commit del RTL, asi el host sabe que bitstream esta cargado en la placa.
@@ -19,8 +19,8 @@
 module top_riscv #(
     parameter CLK_FREQ    = 100_000_000,     // frecuencia de i_clk
     parameter USE_MMCM    = 1,               // 1: sistema a SYS_FREQ (MMCM)
-    parameter MMCM_MULT   = 10,              // VCO = CLK_FREQ * MMCM_MULT
-    parameter MMCM_DIV_X8 = 160,             // divisor de salida * 8 (160 = 20.0)
+    parameter MMCM_MULT   = 7,               // VCO = CLK_FREQ * MMCM_MULT (700 MHz)
+    parameter MMCM_DIV_X8 = 80,              // divisor de salida * 8 (80 = 10.0)
     parameter BAUD_RATE   = 19_200,
     parameter N_TICKS     = 16,
     parameter PTR_LEN     = 2,

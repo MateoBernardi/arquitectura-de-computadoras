@@ -43,6 +43,6 @@ host. La placa conserva la dmem entre programas y el reset del CPU no la borra, 
 de cada programa se corre uno que la pone en cero; la simulación arranca con la dmem en cero
 (`+dmem-en-cero`).
 
-Se comprobó que la comparación detecta diferencias: contra la simulación de la variante
-`hazard_unit_nostall` marca los programas en los que esa variante tarda otros ciclos, y con
-un commit distinto falla la versión.
+Se comprobó que la comparación detecta diferencias: contra la simulación de una variante
+sin stall de load-use (que hacía otros ciclos) marca los programas en los que difieren, y
+con un commit distinto falla la versión.

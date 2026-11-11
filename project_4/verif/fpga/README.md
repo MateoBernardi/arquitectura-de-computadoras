@@ -50,54 +50,54 @@ excluidos a propósito; un puerto **sin ninguna** restricción es un fallo.
 
 ## Frecuencia máxima (`fmax.sh`)
 
-Sintetiza e implementa el diseño a 60, 70, 80, 90 y 100 MHz, en ese orden, y se detiene en
-la primera frecuencia que no pasa los chequeos de la implementación. Pasos más chicos no
-valen la pena: solo interesa una mejora significativa sobre los 50 MHz que ya funcionan.
-Cada punto se implementa, porque la estimación por el margen de setup
-(1 / (período − WNS)) no alcanza: cada frecuencia produce otra ubicación y otro ruteo.
+Sintetiza e implementa el diseño a 50, 60, 70, 80, 90 y 100 MHz, en ese orden, y se
+detiene en la primera frecuencia que no pasa los chequeos de la implementación. Pasos más
+chicos no valen la pena: solo interesa una mejora significativa. Cada punto se
+implementa, porque la estimación por el margen de setup (1 / (período − WNS)) no alcanza:
+cada frecuencia produce otra ubicación y otro ruteo. `fmax.sh <variante>` hace lo mismo con
+una variante de `../variants/`, sobre una copia del RTL.
 
 ### Resultados
 
-Primero se probó un barrido fino desde 50 MHz, en pasos de un divisor del MMCM (≈ 0,33 MHz),
-y se lo detuvo en 52,29 MHz: todos los puntos cerraron timing.
+**El sistema corre a 70 MHz** (`MMCM_MULT = 7`, `MMCM_DIV_X8 = 80`: VCO de 700 MHz,
+divisor 10).
 
 | Frecuencia | WNS (ns) | WHS (ns) | Resultado |
 |---|---|---|---|
-| 50,00 MHz | +0,106 | +0,068 | PASS |
-| 50,31 MHz | +0,151 | +0,037 | PASS |
-| 50,63 MHz | +0,638 | +0,036 | PASS |
-| 50,96 MHz | +0,109 | +0,067 | PASS |
-| 51,28 MHz | +0,522 | +0,023 | PASS |
-| 51,61 MHz | +0,716 | +0,018 | PASS |
-| 51,95 MHz | +0,195 | +0,033 | PASS |
-| 52,29 MHz | +0,184 | +0,049 | PASS |
+| 50 MHz | +1,379 | +0,035 | PASS |
+| 60 MHz | +0,411 | +0,060 | PASS |
+| 70 MHz | +0,077 | +0,076 | PASS |
+| 80 MHz | −1,866 | +0,035 | FAIL |
 
-Dos conclusiones:
-- **la estimación por el margen es pesimista**: a 50 MHz el margen de +0,106 ns estimaba
-  una Fmax de 50,3 MHz, y el diseño cerró hasta 52,29 MHz;
-- **el margen varía mucho entre implementaciones** (de +0,1 a +0,7 ns, sin relación con
-  la frecuencia): depende de cómo quedan la ubicación y el ruteo en cada corrida.
+El camino crítico a 70 MHz y el análisis completo de timing están en
+[`../../RESULTADOS.md`](../../RESULTADOS.md).
 
-Se descartó seguir así: una mejora del 5 % no justifica cambiar la frecuencia. El barrido
-pasó a pasos de 10 MHz:
+### Historia: de 50 a 70 MHz
 
-| Frecuencia | WNS (ns) | WHS (ns) | Resultado |
-|---|---|---|---|
-| 60 MHz | −0,531 | +0,033 | FAIL |
+El diseño anterior adelantaba a EX, desde MEM, el dato leído de la dmem. Su barrido dio:
 
-**El sistema se queda en 50 MHz.** A 60 MHz faltan 0,53 ns: el camino crítico tarda
-16,45 ns y el período es de 16,67 ns (sin contar el margen que exige el reloj). Ese camino
-es la cadena completa de un load seguido de un salto que lo usa:
+| Frecuencia | WNS (ns) | Resultado |
+|---|---|---|
+| 50 MHz | +0,106 | PASS |
+| 50,31 a 52,29 MHz (pasos de un divisor del MMCM) | +0,1 a +0,7 | PASS |
+| 60 MHz | −0,531 | FAIL |
+
+El barrido fino se descartó (un 5 % no justifica cambiar la frecuencia), pero mostró dos
+cosas: la estimación por el margen es pesimista (a 50 MHz estimaba 50,3 MHz y cerró hasta
+52,29 MHz), y el margen varía mucho entre implementaciones (de +0,1 a +0,7 ns, sin relación
+con la frecuencia).
+
+A 60 MHz el camino crítico era la cadena completa de un load seguido de un salto que lo usa:
 
 ```
 EX/MEM (alu_out) → dmem (RAM distribuida, lectura asíncrona) → forwarding → ALU
                  → branch_unit → flush_unit → reset de ID/EX
 ```
 
-Son 20 niveles de lógica, y el 76 % del retardo es ruteo. Para una mejora significativa
-habría que cortar ese camino en el RTL, por ejemplo con una lectura sincrónica de la dmem
-o resolviendo los saltos una etapa más tarde. Eso cambia el pipeline (y su CPI), así que no
-es un ajuste de frecuencia sino un rediseño, y queda fuera de esta etapa.
+Ese forwarding sobraba: con el stall de load-use, la instrucción que usa un load llega a EX
+cuando el load ya está en WB. Sacarlo no cambia ni un ciclo y saca a la dmem del camino:
+de 50 a 70 MHz. La evaluación (y la otra opción, sacar el stall) está en
+[`../README.md`](../README.md#variantes-probar-ideas-sin-vivado).
 
 ## Decisiones
 
@@ -120,7 +120,7 @@ place & route. La equivalencia daría certeza sobre la síntesis, pero:
 - no cubre las optimizaciones que Vivado vuelve a hacer al implementar (`opt_design`,
   `phys_opt_design`), así que la garantía no es de punta a punta;
 - el timing se prueba igual en los dos flujos (STA de Vivado);
-- la síntesis de Yosys para Xilinx suele dar peor timing, y este diseño cierra a 50 MHz
+- la síntesis de Yosys para Xilinx suele dar peor timing, y este diseño cierra a 70 MHz
   con muy poco margen: es probable que con Yosys no cierre, y el objetivo es la máxima
   frecuencia.
 
@@ -131,7 +131,7 @@ Estimación (de criterio, no medida) de la confianza en que el hardware hace lo 
 | la síntesis conserva el comportamiento | ~97 % | ~99,9 % (probado) |
 | las optimizaciones de la implementación lo conservan | ~99 % | ~99 % |
 | timing | ~99,9 % (STA) | ~99,9 % (STA) |
-| cierra a 50 MHz | sí (medido) | ~30 % |
+| cierra a 70 MHz | sí (medido) | ~30 % |
 
 Con la capa `placa`, las dos quedan cerca del 99 % para los programas reales. Se puede
 hacer una prueba de concepto de Yosys + equivalencia más adelante, sin cambiar el flujo,

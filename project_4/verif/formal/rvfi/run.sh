@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Genera y corre los chequeos de riscv-formal sobre el CPU.
 #   ./run.sh                          el diseño, todos los chequeos (checks.cfg)
-#   ./run.sh hazard_unit_nostall      con una variante de verif/variants/
+#   ./run.sh hazard_unit_precise      con una variante de verif/variants/
 #   ./run.sh checks reg_ch0           un solo chequeo
 set -u
 source "$(dirname "$0")/core.sh"

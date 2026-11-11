@@ -23,7 +23,7 @@ Si una herramienta no está en `TOOLS_DIR`, se usa la del sistema.
 ./run.sh rapido                    # todo menos riscv-formal y Vivado (~6 min)
 ./run.sh fpga                      # síntesis, implementación y placa (~12 min, Vivado y la placa)
 ./run.sh act traps                 # solo algunas capas
-./run.sh --variante hazard_unit_nostall rvfi act traps    # una variante
+./run.sh --variante hazard_unit_precise rvfi act traps    # una variante
 ./run.sh --lista                   # capas, grupos y herramientas
 ```
 
@@ -98,26 +98,65 @@ puertos** que uno del RTL. La variante reemplaza al archivo que declara ese mód
 (`tools/variant.sh`), sin tocar nada más:
 
 ```bash
-./rvfi/run.sh hazard_unit_nostall          # riscv-formal con la variante
-sim/build.sh hazard_unit_nostall        # simulador con la variante
-VARIANT=hazard_unit_nostall sim/run_act.sh
+./rvfi/run.sh hazard_unit_precise       # riscv-formal con la variante
+sim/build.sh hazard_unit_precise        # simulador con la variante
+VARIANT=hazard_unit_precise sim/run_act.sh
 sim/bench.py                            # rendimiento: base contra cada variante
+fpga/fmax.sh hazard_unit_precise        # frecuencia máxima con la variante (Vivado)
 ```
 
-
-| Variante | Idea | Dónde se evalúa |
-|---|---|---|
-| `hazard_unit_precise.v` | frenar solo si la instrucción realmente lee el registro | `hazard_unit/`, `rvfi/`, `sim/` |
-| `hazard_unit_nostall.v` | no frenar nunca en load-use | `rvfi/`, `sim/` |
-
 Cada variante responde tres preguntas: **¿cumple RV32I?** (riscv-formal y ACT), **¿cuánto
-gana?** (ciclos en `sim/`) y **¿cuánto cuesta en hardware?** (timing y área en
-Vivado, con `scripts/`).
+gana en ciclos?** (`sim/bench.py`) y **¿a qué frecuencia cierra?** (`fpga/fmax.sh`). Lo
+que se compara al final es el tiempo de ejecución: frecuencia ÷ CPI, en millones de
+instrucciones por segundo (MIPS).
 
-| Variante | ¿Cumple? | Ciclos: suite ACT / suma_arreglo (tabla completa en `sim/README.md`) |
+| Variante | Idea | Estado |
 |---|---|---|
-| `hazard_unit_nostall.v` | sí: riscv-formal 45/45, ACT 39/39 | −7,4 % / −7,6 % |
-| `hazard_unit_precise.v` | sí: riscv-formal 45/45, ACT 39/39 | −0,2 % / 0 % |
+| `hazard_unit_precise.v` | frenar solo si la instrucción realmente lee el registro | queda como variante: −0,2 % de ciclos en ACT, 0 % en los programas |
+
+### La decisión del load-use (noviembre de 2026)
+
+En el diseño anterior el stall de load-use **sobraba**: la dmem se lee de forma
+combinacional y el forwarding desde MEM entregaba el dato del load en el mismo ciclo en que
+la instrucción siguiente estaba en EX. El diseño pagaba las dos cosas: el ciclo del stall y,
+en el camino crítico, dmem → forwarding → ALU. Había dos formas coherentes de arreglarlo:
+
+- **A** (`hazard_unit_nostall`): sacar el stall y dejar el forwarding del load desde MEM.
+- **B** (`riscv_pipeline_load_wb`): dejar el stall y sacar el dato de la dmem del
+  forwarding desde MEM. El load se adelanta desde WB, que es donde está cuando su
+  consumidora llega a EX, así que los ciclos no cambian.
+
+Las dos cumplen la ISA: riscv-formal 45/45, ACT 39/39, traps 19/19. Frecuencia máxima
+(`fpga/fmax.sh`, pasos de 10 MHz):
+
+| Diseño | 50 MHz | 60 MHz | 70 MHz | 80 MHz | fmax |
+|---|---|---|---|---|---|
+| anterior | +0,106 | −0,531 | | | 50 MHz |
+| A: sin stall | +0,659 | +0,272 | −1,408 | | 60 MHz |
+| **B: load desde WB** | +1,379 | +0,411 | +0,077 | −1,866 | **70 MHz** |
+
+(WNS de setup en ns; todos los puntos con hold ≥ 0.) A también sube porque sin stall la
+señal deja de llegar al reset de ID/EX, pero conserva la dmem en el camino crítico.
+
+Rendimiento, cada uno a su fmax (los ciclos de A, de `sim/bench.py` y `sim/perfil.py`; B
+hace exactamente los ciclos del diseño anterior):
+
+| Programa | anterior (50 MHz) | A (60 MHz) | B (70 MHz) | B contra A |
+|---|---|---|---|---|
+| ACT (39 tests) | CPI 1,335 → 37,5 MIPS | CPI 1,236 → 48,5 MIPS | CPI 1,335 → **52,4 MIPS** | +8 % |
+| suma_arreglo (load-use en cada iteración) | 1,616 → 30,9 | 1,492 → 40,2 | 1,616 → **43,3** | +8 % |
+| criba | 1,419 → 35,2 | 1,407 → 42,6 | 1,419 → **49,3** | +16 % |
+| CoreMark | 1,443 → 34,6 | 1,414 → 42,4 | 1,443 → **48,5** | +14 % |
+| Dhrystone | 1,257 → 39,8 | 1,239 → 48,4 | 1,257 → **55,7** | +15 % |
+
+**Se adoptó B.** Gana en todas las cargas, incluso en `suma_arreglo`, el peor caso para
+B (usa cada dato justo después de cargarlo): el stall de load-use cuesta como mucho un 8 %
+de los ciclos, y en los benchmarks un 1,4–2 %, mientras que B corre un 17 % más rápido.
+Contra el diseño anterior, B es un 40 % más rápido con los mismos ciclos.
+
+Desde B, el stall es necesario: el mutante `no_stall` de riscv-formal lo comprueba (ver
+`formal/rvfi/README.md`). B pasó a ser el RTL, y A se borró de `variants/` (con el RTL
+actual no cumple la ISA; queda en la historia de git).
 
 ## Estructura
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Mutantes de los traps: copias del RTL con un error inyectado. Cada una tiene que
-# hacer FALLAR el chequeo de riscv-formal indicado (así se comprueba que esos
-# chequeos realmente miran las excepciones y el mapa de memoria).
+# Mutantes: copias del RTL con un error inyectado. Cada una tiene que hacer FALLAR el
+# chequeo de riscv-formal indicado (así se comprueba que esos chequeos realmente miran
+# las excepciones, el mapa de memoria, el avance del CPU y el stall de load-use).
 set -u
 source "$(dirname "$0")/core.sh"
 RTL="$RTL_DIR/pipeline"
@@ -31,4 +31,8 @@ mutant no_misjump     flow/trap_unit.v  's/wire pc_misaligned  = .*/wire pc_misa
 mutant writes_on_trap riscv_pipeline.v  's/\.ex_reg_write(ex_reg_write & ~ex_exc)/.ex_reg_write(ex_reg_write)/' insn_lw_ch0
 mutant no_illegal     2_decode/illegal_check.v 's/default:    illegal = 1'"'"'b1;/default:    illegal = 1'"'"'b0;/' ill_ch0
 mutant deadlock       flow/hazard_unit.v "0,/        stall = 1'b0;/s//        stall = (id_rs1 == 5'd1);/" liveness_ch0  # se traba para siempre si ID lee x1
+# sin stall de load-use: el load solo se adelanta desde WB, así que la consumidora que
+# viene justo después lee un valor viejo del registro (reg: lo que lee una instrucción
+# es lo último que se escribió en ese registro)
+mutant no_stall       flow/hazard_unit.v "s/                stall = 1'b1;/                stall = 1'b0;/" reg_ch0
 exit $STATUS

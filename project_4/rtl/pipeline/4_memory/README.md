@@ -1,7 +1,8 @@
 # `4_memory/` — etapa MEM
 
 Accede a la memoria de datos: un store escribe, un load lee. La dirección la calculó la
-ALU en EX, y el dato leído va al mux de resultado de WB (y al forwarding).
+ALU en EX, y el dato leído va al mux de resultado de WB (y desde ahí al forwarding: no se
+adelanta desde MEM, ver [`flow/`](../flow/README.md#hazard_unit--stall-de-load-use)).
 
 Diagramas: entradas a la izquierda y salidas a la derecha, con su ancho en bits. En cada salida, **R** = sale de un registro (cambia en el flanco del reloj) y **C** = combinacional (cambia apenas cambian las entradas).
 

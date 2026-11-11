@@ -5,7 +5,7 @@ reset, la UART, la debug unit y el CPU. No tiene lógica propia más allá de la
 el reloj y la palabra de versión.
 
 ```
-  i_clk (100 MHz) ──▶ MMCM ──▶ reloj del sistema (50 MHz) ──▶ todo lo de abajo
+  i_clk (100 MHz) ──▶ MMCM ──▶ reloj del sistema (70 MHz) ──▶ todo lo de abajo
   i_reset (BTNC) ───▶ reset_gen ──▶ reset del sistema ──▶ uart_core, debug_unit
   i_rx ──▶ sync_2ff ──▶ uart_core ◀──bytes──▶ debug_unit ◀──control, carga, bus──▶ riscv_pipeline
   o_tx ◀───────────────── uart_core                │
@@ -40,8 +40,8 @@ Los pines están en `constraints/nexys4ddr_top.xdc`.
 |---|---|---|
 | `CLK_FREQ` | 100 000 000 | frecuencia de `i_clk` (la del oscilador de la placa) |
 | `USE_MMCM` | 1 | 1: el sistema corre a `SYS_FREQ`, generada por el MMCM; 0: usa `i_clk` directo (simulación) |
-| `MMCM_MULT` | 10 | VCO = `CLK_FREQ` × `MMCM_MULT` (600 a 1200 MHz en el Artix-7 -1) |
-| `MMCM_DIV_X8` | 160 | divisor de salida × 8 (va en pasos de 0,125): `SYS_FREQ` = VCO / 20 = **50 MHz** |
+| `MMCM_MULT` | 7 | VCO = `CLK_FREQ` × `MMCM_MULT` = 700 MHz (600 a 1200 MHz en el Artix-7 -1) |
+| `MMCM_DIV_X8` | 80 | divisor de salida × 8 (va en pasos de 0,125): `SYS_FREQ` = VCO / 10 = **70 MHz** |
 | `BAUD_RATE` | 19 200 | velocidad de la UART (ver [`../uart/README.md`](../uart/README.md)) |
 | `N_TICKS` | 16 | muestras por bit de la UART |
 | `PTR_LEN` | 2 | profundidad de las colas de la UART: 4 bytes |
@@ -50,14 +50,12 @@ Los pines están en `constraints/nexys4ddr_top.xdc`.
 
 ## El reloj
 
-El sistema corre a **50 MHz**, generados por un MMCM a partir de los 100 MHz de la placa.
-No corre a 100 MHz porque el CPU no llega: su camino más largo (un load seguido de un salto
-que usa el dato: dmem → forwarding → ALU → comparación → descarte de las instrucciones del
-camino equivocado) tarda unos 16,5 ns, más que los 10 ns de 100 MHz.
-
-Se buscó la frecuencia máxima (`verif/fpga/fmax.sh`): entre 50 y 52,29 MHz el diseño cierra
-timing, y 60 MHz ya no. Una mejora significativa requeriría cambiar el pipeline; el detalle
-está en [`verif/fpga/README.md`](../../verif/fpga/README.md).
+El sistema corre a **70 MHz**, generados por un MMCM a partir de los 100 MHz de la placa:
+es la frecuencia más alta, en pasos de 10 MHz, a la que el diseño cierra timing
+(`verif/fpga/fmax.sh`); a 80 MHz ya no. El camino más largo es el de un salto que depende de
+la instrucción anterior: forwarding → ALU → comparación → descarte de las instrucciones del
+camino equivocado, unos 13,7 ns. El detalle está en [`verif/fpga/README.md`](../../verif/fpga/README.md)
+y en [`RESULTADOS.md`](../../RESULTADOS.md).
 
 Para cambiar la frecuencia alcanza con `MMCM_MULT` y `MMCM_DIV_X8`: la UART calcula su
 divisor con `SYS_FREQ`, y Vivado deriva la restricción del reloj del sistema a partir de la

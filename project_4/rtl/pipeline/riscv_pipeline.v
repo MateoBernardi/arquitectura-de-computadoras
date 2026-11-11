@@ -1,8 +1,9 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
 // Module Name: riscv_pipeline
-// Description: 5-stage RV32I pipeline (IF, ID, EX, MEM, WB) with forwarding,
-//              load-use stall and branch/jump flush (resolved in EX).
+// Description: 5-stage RV32I pipeline (IF, ID, EX, MEM, WB) with forwarding
+//              (from MEM: ALU / pc+4 / LUI results; from WB: everything, loads
+//              included), load-use stall and branch/jump flush (resolved in EX).
 //
 // Debug-unit interface:
 //  - i_rst    : synchronous reset (PC=0, pipeline emptied, x1..x31 cleared).
@@ -207,7 +208,7 @@ module riscv_pipeline #(
     wire [1:0]  forward_a, forward_b;
     wire        mem_reg_write;
     wire [4:0]  mem_rd;
-    wire [31:0] mem_result;
+    wire [31:0] mem_result, mem_fwd;
     forward_unit u_fwd (
         .ex_rs1(ex_rs1), .ex_rs2(ex_rs2),
         .mem_rd(mem_rd), .mem_reg_write(mem_reg_write),
@@ -218,12 +219,12 @@ module riscv_pipeline #(
     reg [31:0] fwd_a_val, fwd_b_val;
     always @(*) begin
         case (forward_a)
-            2'b10:   fwd_a_val = mem_result;
+            2'b10:   fwd_a_val = mem_fwd;
             2'b01:   fwd_a_val = wb_result;
             default: fwd_a_val = ex_rdata1;
         endcase
         case (forward_b)
-            2'b10:   fwd_b_val = mem_result;
+            2'b10:   fwd_b_val = mem_fwd;
             2'b01:   fwd_b_val = wb_result;
             default: fwd_b_val = ex_rdata2;
         endcase
@@ -320,7 +321,7 @@ module riscv_pipeline #(
         .dbg_addr(dbg_dmem_idx), .dbg_data(dbg_dmem_data)
     );
 
-    // value this instruction produces (also forwarded to EX from here)
+    // value this instruction produces (goes to WB)
     reg [31:0] mem_result_r;
     always @(*) begin
         case (mem_wb_sel)
@@ -331,6 +332,14 @@ module riscv_pipeline #(
         endcase
     end
     assign mem_result = mem_result_r;
+
+    // value forwarded from MEM to EX: the same, except it is never the dmem read data.
+    // A load is never in MEM with its consumer in EX: the load-use stall puts a bubble
+    // between them, and the load is forwarded from WB. Leaving the dmem out of this mux
+    // takes the path dmem -> forwarding -> ALU out of a single cycle (verif/README.md,
+    // "Variantes": +40 % fmax, the same cycles).
+    assign mem_fwd = (mem_wb_sel == 2'b10) ? mem_pc4 :
+                     (mem_wb_sel == 2'b11) ? mem_imm : mem_alu_out;
 
     mem_wb_reg u_mem_wb (
         .clk(clk), .rst(rst), .en(en),

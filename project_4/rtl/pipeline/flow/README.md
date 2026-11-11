@@ -15,9 +15,13 @@ Diagramas: entradas a la izquierda y salidas a la derecha, con su ancho en bits.
 
 ## `hazard_unit` — stall de load-use
 
-Un load recién tiene su dato al final de MEM. Si la instrucción que viene detrás lo usa,
-cuando esa instrucción llega a EX el dato todavía no existe ni para el forwarding. La
-única salida es esperar: el pipeline frena IF e ID un ciclo y mete una burbuja en EX.
+Un load recién tiene su dato al final de MEM, después de leer la dmem. Adelantarlo de ahí a
+EX en el mismo ciclo encadenaría la lectura de la dmem, el forwarding y la ALU: era el camino
+crítico del CPU, y con él el sistema no pasaba de 50 MHz. Por eso el dato de un load solo
+se adelanta desde WB, y si la instrucción que viene detrás lo usa, tiene que esperar: el
+pipeline frena IF e ID un ciclo y mete una burbuja en EX. Cuando la instrucción llega a EX,
+el load ya está en WB. (La evaluación que llevó a esto, con la otra opción, que era sacar el
+stall, está en [`verif/README.md`](../../../verif/README.md#variantes-probar-ideas-sin-vivado).)
 
 ```
 lw   x5, 0(x6)     ← en EX: es un load y escribe x5
@@ -60,7 +64,7 @@ wb_reg_write  1 ──▶│                      │
 | `forward_a` / `forward_b` | El operando sale de |
 |---|---|
 | `00` | el regfile (no hay dependencia) |
-| `10` | EX/MEM: la instrucción inmediatamente anterior |
+| `10` | EX/MEM: la instrucción inmediatamente anterior (su resultado de la ALU, pc+4 o el inmediato de LUI; nunca el dato de un load, ver `hazard_unit`) |
 | `01` | MEM/WB: la de dos instrucciones antes |
 
 Si las dos escriben el registro, gana EX/MEM: es el valor más reciente. x0 nunca se reenvía.

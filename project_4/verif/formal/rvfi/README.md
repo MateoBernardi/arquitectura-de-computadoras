@@ -6,9 +6,9 @@ verificar formalmente procesadores RISC-V. Cada chequeo es un BMC desde el reset
 
 ```bash
 ./run.sh                      # checks.cfg: el diseño actual, contra el estándar completo
-./run.sh hazard_unit_nostall  # con una variante de ../variants/
+./run.sh hazard_unit_precise  # con una variante de ../variants/
 ./run.sh checks reg_ch0       # un solo chequeo
-./mutants.sh                  # mutantes de los traps: cada uno tiene que FALLAR
+./mutants.sh                  # mutantes: cada uno tiene que FALLAR
 ```
 
 Los resultados quedan en `$TOOLS_DIR/riscv-formal/cores/tp4/<config>/<chequeo>/`. Los
@@ -58,13 +58,14 @@ archivo del RTL que declara ese módulo.
 
 | Variante | Resultado |
 |---|---|
-| `hazard_unit_nostall` (nunca frena) | **45/45 PASS** |
 | `hazard_unit_precise` (frena solo si la instrucción lee el registro) | **45/45 PASS** |
 
-El stall de load-use **no hace falta** en este CPU. La dmem se lee de forma combinacional
-en MEM, así que el dato del load ya está en el ciclo en que la instrucción siguiente está
-en EX, y el forwarding MEM→EX lo entrega. El costo es de timing: lectura de dmem → mux de
-forwarding → ALU en un mismo ciclo. Eso lo mide Vivado.
+Con el diseño anterior también pasaba `hazard_unit_nostall` (no frenar nunca): la dmem se
+lee de forma combinacional, y el forwarding desde MEM entregaba el dato del load en el
+mismo ciclo, así que el stall sobraba. Ese camino (dmem → forwarding → ALU) era el camino
+crítico, y se sacó del forwarding (ver `../../README.md`, "Variantes"). Desde entonces el
+load se adelanta solo desde WB y **el stall es necesario**: lo comprueba el mutante
+`no_stall`.
 
 ## Resultado (`checks.cfg`): 45/45 PASS
 
@@ -91,6 +92,7 @@ escribía `rd`, y las codificaciones inválidas se ejecutaban) e `ill`.
 | `writes_on_trap` | la instrucción que hace trap escribe `rd` | `insn_lw` |
 | `no_illegal` | los opcodes desconocidos son legales | `ill` |
 | `deadlock` | stall eterno si la instrucción en ID lee x1 | `liveness` |
+| `no_stall` | sin stall de load-use | `reg` (la consumidora del load lee un valor viejo) |
 
 `liveness` solo puede detectar un CPU que se traba **después** de retirar alguna
 instrucción. Si se traba desde el reset, el chequeo no encuentra ninguna instrucción con

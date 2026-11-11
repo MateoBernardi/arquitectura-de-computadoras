@@ -2,7 +2,7 @@
 """bench.py — tabla de rendimiento del CPU base y de cada variante (verif/variants/).
 
     ./bench.py                          todas las variantes
-    ./bench.py hazard_unit_nostall      solo esa (y el diseño base)
+    ./bench.py hazard_unit_precise      solo esa (y el diseño base)
 
 Para cada programa informa instrucciones retiradas, ciclos y CPI, y compara el estado
 final (firma de registros y dmem) contra el diseño base: si una variante termina con
