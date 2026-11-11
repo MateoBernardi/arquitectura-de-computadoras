@@ -13,7 +13,7 @@ source "$HERE/../verif/env.sh"
 export PATH="$(echo "$ROOT"/.tools/xpack-riscv-none-elf-gcc-*/bin):$ROOT/.tools/sail/bin:$HOME/.local/bin:$PATH"
 eval "$(mise env -C "$ACT" -s bash)"
 
-[ -x "$HERE/build/Vtb" ] || "$HERE/build.sh"
+"$HERE/build.sh" ${VARIANT:-} > /dev/null    # siempre: así nunca se corre un binario viejo
 
 make -C "$ACT" CONFIG_FILES="$HERE/act/tp4-rv32i/test_config.yaml" WORKDIR="$HERE/work" \
     ${EXTENSIONS:+EXTENSIONS=$EXTENSIONS}

@@ -21,6 +21,7 @@ achica a 8 palabras con `chparam` (`DMEM_DEPTH`).
 | T5 | halt en curso | el PC no se mueve más |
 | T6 | salto tomado en EX | no hay stall en el ciclo siguiente |
 | T7 | la instrucción de EX detiene el CPU (ecall, ebreak o trap) | el PC no avanza; IF/ID = NOP y ID/EX = burbuja |
+| T8 | reset (en el mismo ciclo) | la dmem no se escribe, aunque `i_enable = 1` y EX/MEM tenga un store |
 
 T7 tiene prioridad sobre T3 y T4. Un load que hace trap puede coincidir con un stall de
 load-use (su consumidora espera en ID): en ese caso IF/ID se vacía en vez de congelarse. Y un
@@ -40,11 +41,12 @@ dice "branch y halt a la vez", que el solver mantiene congelando el CPU con
 
 | Tarea | Resultado | |
 |---|---|---|
-| `bmc` | PASS | ninguna ejecución de hasta 20 ciclos viola T0–T7 |
-| `prove` | PASS | k-inducción: T0–T7, I1 e I2 valen **para cualquier cantidad de ciclos** |
+| `bmc` | PASS | ninguna ejecución de hasta 20 ciclos viola T0–T8 |
+| `prove` | PASS | k-inducción: T0–T8, I1 e I2 valen **para cualquier cantidad de ciclos** |
 | `cover` | PASS | stall, salto, halt, load-use justo después de un salto, pausa durante un stall, trap durante un stall |
 | `mut_flush` | FAIL ✔ | una sola burbuja después de un salto (T4) |
 | `mut_stall` | FAIL ✔ | IF/ID no se congela en un stall (T3) |
+| `mut_rstwr` | FAIL ✔ | la dmem escribe durante el reset (T8) |
 
 ## Notas técnicas
 

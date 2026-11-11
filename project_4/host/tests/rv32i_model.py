@@ -12,7 +12,7 @@ S={'sb':0,'sh':1,'sw':2}
 B={'beq':0,'bne':1,'blt':4,'bge':5,'bltu':6,'bgeu':7}
 def reg(s): return int(s[1:])
 def enc(ins,pc,labels):
-    p=re.split(r'[,\s()]+',ins.strip()); p=[x for x in p if x]; op=p[1]
+    p=re.split(r'[,\s()]+',ins.strip()); p=[x for x in p if x]; op=p[0]
     def t(x): return labels[x]-pc if x in labels else int(x,0)
     if op in R: f3,f7=R[op]; return f7<<25|reg(p[3])<<20|reg(p[2])<<15|f3<<12|reg(p[1])<<7|0x33
     if op in I: return (int(p[3],0)&0xFFF)<<20|reg(p[2])<<15|I[op]<<12|reg(p[1])<<7|0x13

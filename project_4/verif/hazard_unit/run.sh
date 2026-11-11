@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # hazard_unit: seguridad, precisión y la variante precisa.
 NAME=hazard_unit
-source ../tools/suite.sh
+source "$(dirname "$0")/../tools/suite.sh"
 RTL=../../project_4.srcs/sources_1/new/pipeline/flow/hazard_unit.v
 
 # Mutantes del RTL real

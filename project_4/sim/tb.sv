@@ -6,7 +6,11 @@
 //   +hex=<archivo>        imagen del programa: se carga igual en la imem y en la dmem
 //   +max-cycles=<n>       límite de ciclos (por defecto 10 000 000)
 //   +expect-cause=<n>     (tests de traps) PASS si se detiene con esa causa...
-//   +expect-pc=<hex>      ...en esa instrucción
+//   +expect-pc=<hex>      ...en esa instrucción (opcional)
+//
+// Al detenerse informa ciclos, instrucciones retiradas (rvfi_valid, la misma
+// interfaz que usa riscv-formal) y una firma del estado final (x1..x31 y las 256
+// palabras de la dmem real): dos variantes correctas del CPU terminan con la misma.
 //
 // Convención de salida (la misma de rvmodel_macros.h):
 //   - un store a CONSOLE escribe un carácter en la salida estándar;
@@ -26,7 +30,9 @@ module tb;
     always #5 clk = ~clk;
 
     wire halt;
+    `RVFI_WIRES
     riscv_pipeline #(.IMEM_ADDR_W(IMEM_ADDR_W), .DMEM_DEPTH(DMEM_DEPTH)) dut (
+        `RVFI_CONN,
         .clk(clk), .i_rst(rst), .i_enable(!rst), .o_halt(halt),
         .i_imem_we(1'b0), .i_imem_waddr({IMEM_ADDR_W{1'b0}}), .i_imem_wdata(8'd0),
         .i_dbg_addr(16'd0), .o_dbg_data(), .o_dbg_count()
@@ -38,13 +44,14 @@ module tb;
     longint    max_cycles = 10_000_000;
     int        expect_cause = -1;
     reg [31:0] expect_pc = 0;
+    bit        check_pc = 0;
     integer    k;
 
     initial begin
         if (!$value$plusargs("hex=%s", hex)) $fatal(1, "tb: falta +hex=<archivo>");
         void'($value$plusargs("max-cycles=%d", max_cycles));
         void'($value$plusargs("expect-cause=%d", expect_cause));
-        void'($value$plusargs("expect-pc=%h", expect_pc));
+        check_pc = $value$plusargs("expect-pc=%h", expect_pc);
         for (k = 0; k < DMEM_DEPTH; k = k + 1) img[k] = 32'd0;
         $readmemh(hex, img);
         #1;     // después de los initial de imem/dmem (que las llenan con NOP / 0)
@@ -66,16 +73,34 @@ module tb;
 
     // ------------------------------------------------------------- fin
     longint cycles = 0;
+    longint instret = 0;
+    always @(posedge clk) if (rvfi_valid) instret <= instret + 1;
+
+    // firma FNV-1a del estado final
+    function automatic [31:0] signature();
+        reg [31:0] h;
+        integer r;
+        h = 32'h811c_9dc5;
+        for (r = 1; r < 32; r = r + 1) h = (h ^ dut.u_rf.regs[r]) * 32'h0100_0193;
+        for (r = 0; r < 256; r = r + 1)
+            h = (h ^ {dut.u_dmem.lane3[r], dut.u_dmem.lane2[r],
+                      dut.u_dmem.lane1[r], dut.u_dmem.lane0[r]}) * 32'h0100_0193;
+        return h;
+    endfunction
     wire [31:0] tohost = {dut.u_dmem.lane3[TOHOST[22:2]], dut.u_dmem.lane2[TOHOST[22:2]],
                           dut.u_dmem.lane1[TOHOST[22:2]], dut.u_dmem.lane0[TOHOST[22:2]]};
 
     always @(posedge clk) if (!rst) begin
         cycles <= cycles + 1;
         if (halt) begin
-            $display("tb: halt  ciclos=%0d  causa=%0d  pc=%08h  tval=%08h  tohost=%0d",
-                     cycles, dut.trap_cause, dut.trap_pc, dut.trap_tval, tohost);
+            // ciclos: los que el CPU avanzó (como los cuenta la debug unit en la placa,
+            // que baja i_enable apenas ve o_halt). instrucciones: incluye la que lo
+            // detuvo, que está en WB en este ciclo.
+            $display("tb: halt  ciclos=%0d  instrucciones=%0d  causa=%0d  pc=%08h  tval=%08h  tohost=%0d  firma=%08h",
+                     cycles, instret + 1, dut.trap_cause, dut.trap_pc, dut.trap_tval, tohost,
+                     signature());
             if (expect_cause >= 0) begin
-                if (dut.trap_cause == expect_cause[3:0] && dut.trap_pc == expect_pc) $finish;
+                if (dut.trap_cause == expect_cause[3:0] && (!check_pc || dut.trap_pc == expect_pc)) $finish;
                 else $fatal(1, "tb: FAIL, se esperaba causa=%0d pc=%08h", expect_cause, expect_pc);
             end
             else if (tohost == 32'd1) $finish;

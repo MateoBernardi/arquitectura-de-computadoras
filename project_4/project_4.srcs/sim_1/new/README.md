@@ -29,7 +29,9 @@ todo lo que llega.
 2. `step` (un ciclo).
 3. `run` hasta el halt (`ebreak`).
 4. `dump` y comparación de x0..x31 y de las primeras 16 palabras de la dmem contra
-   `pipeline_exp.hex`.
+   `pipeline_exp.hex`, y de la causa del halt (`ebreak`, en su PC).
+   Además, un programa con una instrucción ilegal: trap con causa 2 en su PC, la
+   instrucción anterior retirada y la posterior descartada.
 5. `pause`.
 6. `reset`.
 7. Recarga con **relleno de NOP** (programa más corto que el declarado).
@@ -40,7 +42,7 @@ todo lo que llega.
 
 - El `BAUD_RATE` de simulación es alto para que corra rápido (un bit = 128 clocks).
 - Los `.hex` tienen que estar en el directorio de simulación.
-- En XSIM: `run -all`.
+- En XSIM: `run -all`. Fuera de Vivado: `../../../sim/run_system.sh` (Icarus).
 
 ---
 

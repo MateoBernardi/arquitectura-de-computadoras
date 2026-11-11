@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # forward_unit: prueba, cobertura y mutantes.
 NAME=forward_unit
-source ../tools/suite.sh
+source "$(dirname "$0")/../tools/suite.sh"
 RTL=../../project_4.srcs/sources_1/new/pipeline/flow/forward_unit.v
 
 # Mutantes: copias del RTL con UN error típico cada una

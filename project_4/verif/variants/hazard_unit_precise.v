@@ -6,9 +6,9 @@
 // en ID de verdad usa ese registro. En el formato I (addi, lw, jalr) los bits
 // [24:20] son parte del inmediato; en U/J (lui, auipc, jal) también los [19:15].
 //
-// Contrato de puertos: el mismo que hazard_unit + id_opcode. Para enchufarla
-// en riscv_pipeline.v alcanza con conectar .id_opcode(id_opcode).
-module hazard_unit_precise (
+// Mismo módulo y mismos puertos que flow/hazard_unit.v: se enchufa sin tocar
+// riscv_pipeline.v.
+module hazard_unit (
     input       ex_mem_read,
     input [4:0] ex_rd,
     input [4:0] id_rs1,

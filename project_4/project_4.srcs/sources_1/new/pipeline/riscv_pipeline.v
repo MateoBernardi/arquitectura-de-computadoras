@@ -200,7 +200,7 @@ module riscv_pipeline #(
 
     hazard_unit u_hazard (
         .ex_mem_read(ex_mem_read), .ex_rd(ex_rd),
-        .id_rs1(id_rs1), .id_rs2(id_rs2), .stall(stall)
+        .id_rs1(id_rs1), .id_rs2(id_rs2), .id_opcode(id_opcode), .stall(stall)
     );
 
     // ------------------------------------------------------------------- EX
@@ -314,7 +314,7 @@ module riscv_pipeline #(
     // ------------------------------------------------------------------ MEM
     wire [31:0] mem_rdata, dbg_dmem_data;
     dmem #(.DEPTH(DMEM_DEPTH)) u_dmem (
-        .clk(clk), .we(mem_mem_write & en),
+        .clk(clk), .we(mem_mem_write & en & ~rst),   // reset: nothing is written
         .addr(mem_alu_out), .wdata(mem_rdata2),
         .funct3(mem_funct3), .rdata(mem_rdata),
         .dbg_addr(dbg_dmem_idx), .dbg_data(dbg_dmem_data)

@@ -6,7 +6,7 @@ verificar formalmente procesadores RISC-V. Cada chequeo es un BMC desde el reset
 
 ```bash
 ./run.sh                      # checks.cfg: el diseño actual, contra el estándar completo
-./run.sh nostall              # nostall.cfg: variante sin stall de load-use
+./run.sh hazard_unit_nostall  # con una variante de ../variants/
 ./run.sh checks reg_ch0       # un solo chequeo
 ./mutants.sh                  # mutantes de los traps: cada uno tiene que FALLAR
 ```
@@ -23,8 +23,9 @@ contraejemplos están en `engine_0/trace.vcd`.
    memoria se publican con la dirección alineada a 4 (`RISCV_FORMAL_ALIGNED_MEM`).
 2. **`wrapper.sv`** conecta el CPU con riscv-formal:
    - las instrucciones son **arbitrarias** en cada lectura (`imem_anyseq.v`);
-   - `i_enable` es libre (la debug unit puede pausar en cualquier ciclo), pero vale 0
-     durante el reset, que es el contrato de la debug unit.
+   - `i_enable` es libre en todo ciclo, incluso durante el reset: no se supone nada
+     sobre la debug unit. (Por eso la dmem no escribe durante el reset: si no, un store
+     que quedó en EX/MEM se escribiría.)
 3. **`pma.sv`** es el mapa de memoria (`RISCV_FORMAL_PMA_MAP`): qué direcciones se pueden
    ejecutar (la imem) y leer o escribir (la dmem). Un acceso fuera de ese mapa tiene que
    generar un trap, sin escribir nada.
@@ -42,29 +43,39 @@ contraejemplos están en `engine_0/trace.vcd`.
 | `causal` | ¿una escritura se retira antes que las lecturas que dependen de ella? |
 | `unique` | ¿cada instrucción se retira una sola vez? |
 | `cover` | ¿se retiran instrucciones? (que lo anterior no sea vacío) |
-| `ill` | ¿una instrucción ilegal genera una excepción? |
+| `ill` | ¿una instrucción ilegal genera una excepción? (solo prueba `0x00000000`; la decodificación completa está en `../datapath/illegal_props.sv`) |
+| `liveness` | ¿después de cada instrucción se retira la siguiente, en a lo sumo 8 ciclos? (el CPU no se traba) |
 
 En los `insn_*`, una instrucción que según la spec genera una excepción (salto a una
 dirección no alineada, load/store desalineado, acceso fuera del mapa de memoria) tiene que
 retirarse con `trap = 1`, sin escribir registros ni memoria.
 
-## Configuraciones
+## Variantes
 
-| Archivo | Qué cambia |
+`./run.sh <variante>` corre los mismos 45 chequeos con un módulo de `../variants/` en
+lugar del original. La configuración se genera a partir de `checks.cfg`, reemplazando el
+archivo del RTL que declara ese módulo.
+
+| Variante | Resultado |
 |---|---|
-| `checks.cfg` | el diseño actual, **sin suposiciones** |
-| `nostall.cfg` | `hazard_unit` → `../variants/hazard_unit_nostall.v` (nunca frena) |
+| `hazard_unit_nostall` (nunca frena) | **45/45 PASS** |
+| `hazard_unit_precise` (frena solo si la instrucción lee el registro) | **45/45 PASS** |
 
-**`nostall.cfg`: 44/44 PASS.** El stall de load-use **no hace falta** en este CPU. La dmem
-se lee de forma combinacional en MEM, así que el dato del load ya está en el ciclo en que
-la instrucción siguiente está en EX, y el forwarding MEM→EX lo entrega. El costo es de
-timing: lectura de dmem → mux de forwarding → ALU en un mismo ciclo. Eso lo mide Vivado.
+El stall de load-use **no hace falta** en este CPU. La dmem se lee de forma combinacional
+en MEM, así que el dato del load ya está en el ciclo en que la instrucción siguiente está
+en EX, y el forwarding MEM→EX lo entrega. El costo es de timing: lectura de dmem → mux de
+forwarding → ALU en un mismo ciclo. Eso lo mide Vivado.
 
-## Resultado (`checks.cfg`): 44/44 PASS
+## Resultado (`checks.cfg`): 45/45 PASS
 
 Todos los chequeos pasan, **sin suposiciones** sobre el programa: el solver elige
 cualquier instrucción en cada ciclo, incluidas las ilegales, los saltos a direcciones no
 alineadas y los accesos fuera de memoria. Corre en unos 10 minutos con 8 hilos.
+
+`liveness` es el único chequeo con una suposición, y es de **equidad**: la debug unit no
+pausa el CPU más de 2 ciclos seguidos (`TP4_FAIRNESS` en `wrapper.sv`). Sin ella la
+pregunta no tiene sentido, porque un CPU pausado para siempre no retira nada. Los demás
+chequeos no la usan.
 
 Antes de implementar los traps, el resultado era 36 PASS y 8 FAIL: los 6 branches (un
 salto a una dirección no alineada no generaba una excepción), `reg` (un load desalineado
@@ -79,6 +90,12 @@ escribía `rd`, y las codificaciones inválidas se ejecutaban) e `ill`.
 | `no_misjump` | un salto a una dirección no alineada no es un trap | `insn_beq` |
 | `writes_on_trap` | la instrucción que hace trap escribe `rd` | `insn_lw` |
 | `no_illegal` | los opcodes desconocidos son legales | `ill` |
+| `deadlock` | stall eterno si la instrucción en ID lee x1 | `liveness` |
+
+`liveness` solo puede detectar un CPU que se traba **después** de retirar alguna
+instrucción. Si se traba desde el reset, el chequeo no encuentra ninguna instrucción con
+la que empezar y termina con ERROR (no con FAIL). Ese caso lo cubre `cover`, que exige
+que se retiren instrucciones.
 
 ## Fuera del alcance de riscv-formal
 

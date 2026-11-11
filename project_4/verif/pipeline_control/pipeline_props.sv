@@ -36,7 +36,7 @@ module pipeline_props (
     (* keep *) wire [31:0] fv_pc, fv_if_inst, fv_id_inst, fv_redirect_target;
     (* keep *) wire        fv_stall, fv_redirect, fv_stop_fetch, fv_halting;
     (* keep *) wire        fv_ex_reg_write, fv_ex_mem_read, fv_ex_mem_write;
-    (* keep *) wire        fv_ex_branch, fv_ex_jump, fv_ex_halt;
+    (* keep *) wire        fv_ex_branch, fv_ex_jump, fv_ex_halt, fv_dmem_we;
 
     wire [4:0] idex_class = {fv_ex_branch, fv_ex_jump, fv_ex_halt,
                              fv_ex_mem_read, fv_ex_mem_write};
@@ -65,6 +65,9 @@ module pipeline_props (
             i1_idex_one_class: assert ($onehot0(idex_class));
             // I2: desde que hay un halt en curso, EX solo contiene burbujas.
             i2_halting_bubble:  assert (!fv_halting || ex_bubble);
+            // T8: durante el reset la dmem no se escribe (aunque i_enable = 1 y
+            //     EX/MEM tenga un store de antes del reset).
+            t8_reset_no_store:  assert (!i_rst || !fv_dmem_we);
         end
     end
 
@@ -128,7 +131,7 @@ module pipeline_props (
 
         // T6 — nunca hay stall en el ciclo siguiente a un salto tomado
         //      (EX tiene una burbuja, y una burbuja no es un load).
-        //      Empezó como un cover que resultó inalcanzable: ver README §5.
+        //      Empezó como un cover que el solver demostró inalcanzable.
         if (past_run && $past(fv_redirect)) begin
             t6_no_stall_after_redirect: assert (!fv_stall);
         end

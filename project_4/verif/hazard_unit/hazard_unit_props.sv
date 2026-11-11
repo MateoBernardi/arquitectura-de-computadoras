@@ -22,20 +22,13 @@ module hazard_unit_props (
 
     // ---------------------------------------------------------------- DUT
     wire stall;
-`ifdef PRECISE
-    // Variante alternativa: conoce el opcode (ver hazard_unit_precise.v)
-    hazard_unit_precise dut (
+    // Con -DPRECISE el .sby lee la variante (hazard_unit_precise.v) en lugar de
+    // hazard_unit.v: mismo módulo, mismos puertos.
+    hazard_unit dut (
         .ex_mem_read(ex_mem_read), .ex_rd(ex_rd),
         .id_rs1(id_rs1), .id_rs2(id_rs2), .id_opcode(opcode),
         .stall(stall)
     );
-`else
-    hazard_unit dut (
-        .ex_mem_read(ex_mem_read), .ex_rd(ex_rd),
-        .id_rs1(id_rs1), .id_rs2(id_rs2),
-        .stall(stall)
-    );
-`endif
 
     // ------------------------------------------- ESPECIFICACIÓN (ISA RV32I)
     // Qué instrucciones LEEN rs1 / rs2 según el manual de RISC-V,

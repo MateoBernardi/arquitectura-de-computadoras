@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Genera y corre los chequeos de riscv-formal sobre el CPU de project_4.
-#   ./run.sh                     configuración checks.cfg, todos los chequeos
-#   ./run.sh nostall             configuración nostall.cfg (variante)
-#   ./run.sh checks reg_ch0      un solo chequeo
+#   ./run.sh                          el diseño, todos los chequeos (checks.cfg)
+#   ./run.sh hazard_unit_nostall      con una variante de ../variants/
+#   ./run.sh checks reg_ch0           un solo chequeo
 set -u
 cd "$(dirname "$0")"
 source ../env.sh
+source ../tools/variant.sh
 CFG=${1:-checks}; shift || true
 HERE=$(pwd)
 RF=$(cd ../../../.tools 2>/dev/null && pwd)/riscv-formal
@@ -15,7 +16,15 @@ RF=$(cd ../../../.tools 2>/dev/null && pwd)/riscv-formal
 # directorio real, así que ahí armamos una carpeta con enlaces a estos archivos.
 CORE="$RF/cores/tp4"
 mkdir -p "$CORE"
-for f in *.cfg wrapper.sv imem_anyseq.v pma.sv; do ln -sfn "$HERE/$f" "$CORE/$f"; done
+for f in checks.cfg wrapper.sv imem_anyseq.v pma.sv; do ln -sfn "$HERE/$f" "$CORE/$f"; done
+# Con una variante: la misma configuración, con el archivo del RTL reemplazado.
+if [ "$CFG" != checks ]; then
+    target=$(variant_target "$CFG") || exit 1
+    sed "s|^@basedir@/../../project_4/project_4.srcs/sources_1/new/pipeline/$target\$|$(variant_file "$CFG")|" \
+        checks.cfg > "$CORE/$CFG.cfg"
+    grep -q "$(variant_file "$CFG")" "$CORE/$CFG.cfg" || { echo "no se pudo reemplazar $target"; exit 1; }
+    rm -rf "${CORE:?}/$CFG"
+fi
 (cd "$CORE" && python3 ../../checks/genchecks.py "$CFG") || exit 1
 
 targets=()

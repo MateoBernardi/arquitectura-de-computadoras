@@ -19,10 +19,12 @@ module tb_top_riscv;
     localparam integer CAP_WORDS   = 1 << (IMEM_ADDR_W - 2);
     localparam integer RX_TIMEOUT  = 40 * 10 * BIT_CLKS;
     localparam [31:0]  NOP         = 32'h0000_0013;
-    // Bus de debug de riscv_pipeline (ver encabezado): 22 palabras de etapas, 32 registros, 32 de dmem
+    // Bus de debug de riscv_pipeline (ver encabezado): 22 palabras de etapas, 32 registros,
+    // 32 de dmem y 3 del trap (causa, pc, valor)
     localparam integer DBG_REGS_AT = 22;
     localparam integer DBG_DMEM_AT = 54;
-    localparam integer DBG_NWORDS  = 86;
+    localparam integer DBG_TRAP_AT = 86;
+    localparam integer DBG_NWORDS  = 89;
 
     reg        clk = 1'b0;
     reg        rst_btn;
@@ -243,6 +245,30 @@ module tb_top_riscv;
         end
     endtask
 
+    // Causa y PC del trap (palabras 86 y 87 del dump), con el CPU en halt
+    task expect_trap(input [31:0] cause, input [31:0] pc);
+        begin
+            dump;
+            checks = checks + 1;
+            if (dw[DBG_TRAP_AT] !== cause || dw[DBG_TRAP_AT + 1] !== pc) begin
+                errors = errors + 1;
+                $display("FAIL t=%0t: trap causa=%0d pc=%h, esperado causa=%0d pc=%h", $time,
+                         dw[DBG_TRAP_AT], dw[DBG_TRAP_AT + 1], cause, pc);
+            end
+            else $display("OK   trap causa=%0d pc=%h", cause, pc);
+        end
+    endtask
+
+    // PC del ebreak del programa de prueba
+    function [31:0] ebreak_pc(input integer n);
+        integer k;
+        begin
+            ebreak_pc = 32'hFFFF_FFFF;
+            for (k = n - 1; k >= 0; k = k - 1)
+                if (prog[k] === 32'h0010_0073) ebreak_pc = 4 * k;
+        end
+    endfunction
+
     task step_n(input integer n_steps);
         integer s;
         begin
@@ -297,6 +323,7 @@ module tb_top_riscv;
         expect_led(2, 1'b1);
         expect_led(0, 1'b0);
         check_state;
+        expect_trap(32'd3, ebreak_pc(prog_len));               // causa 3 = ebreak
         uart_send("S");
         expect_reply("H");                             // sigue en halt
 
@@ -325,6 +352,22 @@ module tb_top_riscv;
         snap_pc = dw[0];
         repeat (500) @(posedge clk);
         dump_expect_pc(snap_pc);
+
+        $display("-- Trap: instruccion ilegal (no escribe nada, lo anterior se retira)");
+        prog[0] = 32'h0010_0093;                       // addi x1,x0,1
+        prog[1] = 32'h0000_0000;                       // ilegal
+        prog[2] = 32'h0020_0113;                       // addi x2,x0,2 (no se ejecuta)
+        load_program(3, "K");
+        uart_send("R");
+        expect_reply("K");
+        expect_reply("H");
+        expect_trap(32'd2, 32'h4);                     // causa 2 = ilegal, en pc 4
+        checks = checks + 1;
+        if (dw[DBG_REGS_AT + 1] !== 32'd1 || dw[DBG_REGS_AT + 2] !== 32'd0) begin
+            errors = errors + 1;
+            $display("FAIL x1=%h x2=%h, esperado x1=1 x2=0", dw[DBG_REGS_AT + 1], dw[DBG_REGS_AT + 2]);
+        end
+        else $display("OK   x1=1 (anterior retirada), x2=0 (posterior descartada)");
 
         $display("-- Recarga con un programa mas corto: el resto queda en NOP");
         for (i = 0; i < 256; i = i + 1)

@@ -4,7 +4,7 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 export PATH="$(echo "$HERE"/../../.tools/xpack-riscv-none-elf-gcc-*/bin):$PATH"
-[ -x "$HERE/build/Vtb" ] || "$HERE/build.sh"
+"$HERE/build.sh" ${VARIANT:-} > /dev/null    # siempre: así nunca se corre un binario viejo
 OUT="$HERE/work/traps"; mkdir -p "$OUT"
 fail=0
 for s in "$HERE"/tests/traps/*.S; do

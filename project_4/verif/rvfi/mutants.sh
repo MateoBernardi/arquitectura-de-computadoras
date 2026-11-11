@@ -36,4 +36,5 @@ mutant no_imem_range  riscv_pipeline.v  's/wire       id_fetch_fault = .*/wire  
 mutant no_misjump     flow/trap_unit.v  's/wire pc_misaligned  = .*/wire pc_misaligned  = 1'"'"'b0;/' insn_beq_ch0
 mutant writes_on_trap riscv_pipeline.v  's/\.ex_reg_write(ex_reg_write & ~ex_exc)/.ex_reg_write(ex_reg_write)/' insn_lw_ch0
 mutant no_illegal     2_decode/illegal_check.v 's/default:    illegal = 1'"'"'b1;/default:    illegal = 1'"'"'b0;/' ill_ch0
+mutant deadlock       flow/hazard_unit.v "0,/        stall = 1'b0;/s//        stall = (id_rs1 == 5'd1);/" liveness_ch0  # se traba para siempre si ID lee x1
 exit $STATUS

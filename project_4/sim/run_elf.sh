@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Corre un ELF en el simulador. Uso: run_elf.sh [--elf] <archivo.elf> [+max-cycles=N]
 # Código de salida 0 = PASS. Es el comando que usa run_act.sh.
+# VARIANT=<nombre> usa el simulador de esa variante (./build.sh <nombre>).
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 [ "${1:-}" = "--elf" ] && shift
@@ -15,4 +16,4 @@ d = open(sys.argv[1], "rb").read()
 d += b"\0" * (-len(d) % 4)
 open(sys.argv[2], "w").write("".join("%08x\n" % w for w in struct.unpack("<%dI" % (len(d) // 4), d)))
 PY
-"$HERE/build/Vtb" "+hex=$TMP/img.hex" "$@"
+"$HERE/build/${VARIANT:-base}/Vtb" "+hex=$TMP/img.hex" "$@"

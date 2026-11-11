@@ -1,7 +1,7 @@
 # pipeline_control.  Correr con:  ./run.sh
 #
 # Tareas:
-#   bmc        — chequeo ACOTADO: ninguna ejecución de hasta 20 ciclos rompe T0..T6
+#   bmc        — chequeo ACOTADO: ninguna ejecución de hasta 20 ciclos rompe T0..T8
 #   prove      — k-inducción con invariantes I1, I2: vale para CUALQUIER cantidad de ciclos
 #   cover      — escenarios concretos (stall, salto, halt, combinaciones)
 #   mut_*      — mutantes del RTL; se ESPERA FAIL
@@ -11,6 +11,7 @@ prove
 cover
 mut_flush
 mut_stall
+mut_rstwr
 
 [options]
 bmc:       mode bmc
@@ -23,17 +24,21 @@ mut_flush: mode bmc
 mut_flush: depth 12
 mut_stall: mode bmc
 mut_stall: depth 12
+mut_rstwr: mode bmc
+mut_rstwr: depth 12
 
 [engines]
 smtbmc bitwuzla
 
 [script]
 read -formal pipeline_props.sv
-read -formal imem_formal.v riscv_pipeline.v control.v immgen.v regfile.v alu.v branch_unit.v dmem.v forward_unit.v hazard_unit.v illegal_check.v trap_unit.v
+read -formal imem_formal.v control.v immgen.v regfile.v alu.v branch_unit.v dmem.v forward_unit.v hazard_unit.v illegal_check.v trap_unit.v
 ~mut_flush: read -formal flush_unit.v
 mut_flush:  read -formal flush_unit_mut_flush.v
 ~mut_stall: read -formal pipe_reg.v
 mut_stall:  read -formal pipe_reg_mut_stall.v
+~mut_rstwr: read -formal riscv_pipeline.v
+mut_rstwr:  read -formal riscv_pipeline_mut_rstwr.v
 # dmem de 8 palabras en vez de 256: menos estado para el solver.
 chparam -set DMEM_DEPTH 8 riscv_pipeline
 hierarchy -top pipeline_props
@@ -43,7 +48,7 @@ proc -norom
 flatten
 # --- "referencias jerárquicas" hechas a mano: fv_X = dut.X ---
 # -nomap es imprescindible: sin él, connect resuelve alias y puede dejar
-# desconectado otro nombre del mismo cable (ver README §6).
+# desconectado otro nombre del mismo cable.
 connect -nomap -set fv_pc              dut.pc
 connect -nomap -set fv_if_inst         dut.if_inst
 connect -nomap -set fv_id_inst         dut.id_inst
@@ -58,6 +63,7 @@ connect -nomap -set fv_ex_mem_write    dut.ex_mem_write
 connect -nomap -set fv_ex_branch       dut.ex_branch
 connect -nomap -set fv_ex_jump         dut.ex_jump
 connect -nomap -set fv_ex_halt         dut.ex_halt
+connect -nomap -set fv_dmem_we         dut.u_dmem.we
 # el programa libre del harness entra a la imem formal
 connect -nomap -set dut.u_imem.fv_prog prog
 prep -top pipeline_props
@@ -83,3 +89,4 @@ pipeline_props.sv
 ../../project_4.srcs/sources_1/new/pipeline/regs/pipe_reg.v
 build/mutants/flush_unit_mut_flush.v
 build/mutants/pipe_reg_mut_stall.v
+build/mutants/riscv_pipeline_mut_rstwr.v

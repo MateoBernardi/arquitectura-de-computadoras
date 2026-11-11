@@ -27,6 +27,9 @@ module hazard_unit (
     input [4:0] ex_rd,      // load destination register
     input [4:0] id_rs1,     // ID instruction source 1
     input [4:0] id_rs2,     // ID instruction source 2
+    input [6:0] id_opcode,  // ID instruction opcode: not used by this policy (it
+                            // stalls even if the instruction does not read the
+                            // register); available so a variant can refine it
     output reg  stall          // 1 = insert stall
 );
     always @(*) begin

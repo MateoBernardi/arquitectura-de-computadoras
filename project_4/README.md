@@ -229,4 +229,4 @@ autoverificada contra Sail, el modelo de referencia de la ISA. Ver [sim/README.m
 Toda excepción (instrucción ilegal, salto a una dirección no alineada, load/store
 desalineado o fuera de memoria) es un *fatal trap*: el CPU se detiene sin que la
 instrucción escriba nada, y la debug unit muestra la causa y el PC. Resultados:
-riscv-formal 44/44, riscv-arch-test 39/39.
+riscv-formal 45/45, riscv-arch-test 39/39.
