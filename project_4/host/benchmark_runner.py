@@ -34,7 +34,7 @@ def main():
     parser.add_argument("--port", default=None, help="Puerto serie (ej. /dev/ttyUSB1 o COM3)")
     parser.add_argument("--baud", type=int, default=DEFAULT_BAUD, help=f"Baudrate (default: {DEFAULT_BAUD})")
     parser.add_argument("--asm", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "programs", "criba.s"), help="Archivo assembly a ejecutar")
-    parser.add_argument("--freq-mhz", type=float, default=50.0, help="Frecuencia del core en MHz (default: 50.0)")
+    parser.add_argument("--freq-mhz", type=float, default=70.0, help="Frecuencia del core en MHz (default: 70.0, la de top_riscv)")
     args = parser.parse_args()
 
     port = args.port or auto_detect_port()
