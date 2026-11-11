@@ -8,7 +8,8 @@ memorias de la placa (verif/sim, `build.sh placa`): cada programa tiene que term
 la placa con los mismos registros, la misma dmem, la misma causa de halt y la misma
 cantidad de ciclos que en la simulación.
 
-  1. versión: la palabra BUILD_ID del dump es el commit que se está probando
+  1. versión: la palabra BUILD_ID del dump es la versión del hardware que se está probando
+     (el último commit que cambió rtl/, constraints/ o los tcl de verif/fpga/)
   2. programas de programs/ (ensamblados con el ensamblador del host)
   3. tests de traps de verif/sim/tests/traps/ (causa, PC y dirección del trap)
   4. comandos de la debug unit: step, run, pausa, reset, programa demasiado grande,
@@ -209,12 +210,12 @@ def main():
     want = int(a.build_id, 16)
     got = d["build"]
     if want == 0:
-        check(False, "el RTL tiene cambios sin commitear: no hay una versión con qué comparar la placa")
+        check(False, "el hardware tiene cambios sin commitear: no hay una versión con qué comparar la placa")
     else:
-        check(got == want, f"la placa tiene el commit {got:08x}" if got is not None else
+        check(got == want, f"la placa tiene la versión {got:08x} del hardware" if got is not None else
               "la placa no tiene palabra de versión (bitstream anterior)")
         if got != want:
-            print(f"        se está probando el commit {want:08x}: programar la FPGA con ese bitstream")
+            print(f"        el hardware actual es {want:08x}: correr verif/run.sh programar placa (o fpga)")
             sys.exit(1)
 
     print("== programas")

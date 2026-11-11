@@ -1,23 +1,10 @@
-# Genera el bitstream a partir de la implementación ya verificada (capa implementacion)
-# y programa la FPGA por JTAG. Es lo mismo que hacer "Generate Bitstream" y "Program
-# Device" en la GUI de Vivado; cualquiera de las dos sirve antes de la capa placa.
-#   vivado -mode batch -source verif/placa/program.tcl
-# Si impl_1 no está completa o quedó desactualizada, falla: no implementa de nuevo.
+# Programa la FPGA por JTAG con un bitstream ya generado (capa bitstream). Es lo mismo que
+# "Program Device" en la GUI de Vivado; cualquiera de las dos sirve antes de la capa placa.
+#   TP4_BIT=build/bitstream/top_riscv.bit vivado -mode batch -source verif/placa/program.tcl
+# Sin TP4_BIT usa build/bitstream/top_riscv.bit.
 set root [file normalize [file join [file dirname [info script]] .. ..]]
-open_project $root/build/vivado/tp4.xpr
-set impl [get_runs impl_1]
-if {[get_property PROGRESS $impl] ne "100%" || [get_property NEEDS_REFRESH $impl]} {
-    puts "TP4_ERROR: impl_1 no está completa o está desactualizada: correr antes verif/run.sh fpga"
-    exit 1
-}
-if {![string match "write_bitstream Complete*" [get_property STATUS $impl]]} {
-    launch_runs impl_1 -to_step write_bitstream -jobs 8
-    wait_on_run impl_1
-}
-set bit [lindex [glob -nocomplain [get_property DIRECTORY $impl]/*.bit] 0]
-if {$bit eq ""} { puts "TP4_ERROR: no se generó el bitstream"; exit 1 }
-puts "TP4_BIT: $bit"
-close_project
+set bit [expr {[info exists ::env(TP4_BIT)] ? $::env(TP4_BIT) : "$root/build/bitstream/top_riscv.bit"}]
+if {![file exists $bit]} { puts "TP4_ERROR: no existe $bit: correr antes la capa bitstream"; exit 1 }
 
 open_hw_manager
 connect_hw_server -allow_non_jtag
@@ -27,5 +14,12 @@ if {$dev eq ""} { puts "TP4_ERROR: no se encontró la FPGA (xc7a100t) por JTAG";
 current_hw_device $dev
 set_property PROGRAM.FILE $bit $dev
 program_hw_devices $dev
+# DONE: la FPGA terminó de configurarse (registro de estado leído por JTAG)
+if {[catch {refresh_hw_device $dev; get_property REGISTER.CONFIG_STATUS.BIT14_DONE_PIN $dev} done]} {
+    puts "TP4_DONE: no se pudo leer ($done)"
+} else {
+    puts "TP4_DONE: $done"
+    if {$done ne "1"} { puts "TP4_ERROR: la FPGA no terminó de configurarse (DONE = $done)"; exit 1 }
+}
 puts "TP4_PROGRAMADA: $dev"
 close_hw_manager

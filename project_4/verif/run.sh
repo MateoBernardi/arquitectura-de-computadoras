@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Verificación del proyecto por capas, en el orden de las etapas del flujo:
 #   RTL (formal, rvfi, act, traps, rendimiento, sistema) → síntesis (sintesis)
-#   → implementación (implementacion) → bitstream (sin capa: se genera en placa)
-#   → placa (placa). host prueba el software de la PC, fuera del flujo.
+#   → implementación (implementacion) → bitstream (bitstream) → placa (programar, placa).
+#   host prueba el software de la PC, fuera del flujo.
 #
 #   ./run.sh                     todas las capas
 #   ./run.sh act traps           solo esas capas
 #   ./run.sh rapido              grupo: todo menos riscv-formal (la capa más larga)
+#   ./run.sh programar placa     programar la FPGA con el último bitstream y probarla
 #   ./run.sh --variante <nombre> rvfi, act y traps con una variante de variants/
 #   ./run.sh --lista             las capas, qué prueba cada una y si están sus herramientas
 #
@@ -17,6 +18,13 @@
 # Código de salida: 0 todo PASS, 1 algún FAIL, 2 sin FAIL pero con algún SKIP.
 #
 # Reportes (se reescriben en cada corrida): build/reports/<capa>.log y build/reports/resumen.md
+#
+# sintesis e implementacion reutilizan su última corrida verificada si rtl/, constraints/ y
+# verif/fpga/ no cambiaron desde entonces (TP4_REHACER=1 las rehace igual).
+#
+# Todo el script va entre llaves: bash lo lee completo antes de empezar, así que editarlo
+# (o hacer checkout) mientras corre no rompe la corrida en curso.
+{
 set -u
 cd "$(dirname "$0")" || exit 1
 source env.sh
@@ -34,13 +42,15 @@ LAYERS=(
 "host|el software de la PC: protocolo UART, desensamblador y GUI|cmd:python3 py:tkinter"
 "sintesis|Vivado: el netlist es lo que pide el RTL (avisos justificados, sin latches, memorias), con mutantes|cmd:vivado"
 "implementacion|Vivado: STA completo (nada sin restringir; setup, hold, pulso), cruces de reloj, ruteo, DRC|cmd:vivado"
-"placa|la FPGA real por la UART (la programa antes por JTAG): versión, programas y traps comparados contra la simulación, comandos|cmd:verilator cmd:riscv-none-elf-gcc cmd:vivado dir:riscv-formal py:serial dev:placa"
+"bitstream|Vivado: el bitstream sale de la implementación verificada del hardware actual (con su DRC)|cmd:vivado"
+"programar|programa la FPGA por JTAG con ese bitstream y verifica que terminó de configurarse|cmd:vivado dev:placa"
+"placa|la FPGA real por la UART: versión, programas y traps comparados contra la simulación, comandos|cmd:verilator cmd:riscv-none-elf-gcc dir:riscv-formal py:serial dev:placa"
 )
 declare -A LAYER_GROUPS=(
-    [todo]="formal rvfi act traps rendimiento sistema host sintesis implementacion placa"
+    [todo]="formal rvfi act traps rendimiento sistema host sintesis implementacion bitstream programar placa"
     [rtl]="formal rvfi act traps rendimiento"
     [rapido]="formal act traps rendimiento sistema host"
-    [fpga]="sintesis implementacion placa"
+    [fpga]="sintesis implementacion bitstream programar placa"
 )
 
 layer_field() {   # layer_field <capa> <n>
@@ -91,20 +101,51 @@ run_rendimiento() {
 run_sistema()     { system/run.sh; }
 run_host()        { python3 tools/pyunit.py "$PROJ/host/tests"; }
 
-# Versión del RTL que va al dump: el commit, si rtl/ y constraints/ no tienen cambios sin
-# commitear; si no, 0 ("sin versión"), para no atribuirle a un commit un RTL que no es el suyo.
-build_id() {
-    if [ -z "$(git -C "$PROJ" status --porcelain -- rtl constraints 2>/dev/null)" ]; then
-        git -C "$PROJ" rev-parse --short=8 HEAD
+# version_of <rutas...>: el último commit que cambió esas rutas (8 dígitos hex), o 0 si
+# tienen cambios sin commitear (no hay un commit al que atribuírselos).
+version_of() {
+    if [ -z "$(git -C "$PROJ" status --porcelain -- "$@" 2>/dev/null)" ]; then
+        git -C "$PROJ" log -1 --format=%H -- "$@" | cut -c1-8
     else echo 0; fi
 }
+# Versión del hardware que va al dump (BUILD_ID): el último commit que cambió algo de lo que
+# entra al bitstream. Un commit que solo toca documentación, tests o el host no la cambia.
+HW_FILES=(':(glob)rtl/**/*.v' ':(glob)rtl/**/*.vh' ':(glob)constraints/*.xdc'
+          verif/fpga/create_project.tcl verif/fpga/synth.tcl verif/fpga/impl.tcl)
+build_id() { version_of "${HW_FILES[@]}"; }
+
+# Reutilización de sintesis e implementacion: la huella es el último commit que cambió el
+# hardware o los chequeos de FPGA (verif/fpga/, sin contar los .md). Si la última corrida
+# verificada (PASS) de la capa tiene la misma huella, se muestra su resultado en lugar de
+# volver a correr Vivado. FPGA_KEY se toma al empezar cada capa (ver la corrida).
+FPGA_FILES=("${HW_FILES[@]}" verif/fpga ':(exclude,glob)verif/fpga/**/*.md')
+VERIFICADO="$PROJ/build/verificado"
+FPGA_KEY=0
+reused() {   # reused <capa>: 0 (y muestra el resultado anterior) si se puede reutilizar
+    [ "${TP4_REHACER:-0}" = 1 ] && return 1
+    [ "$FPGA_KEY" != 0 ] && [ -f "$VERIFICADO/$1.clave" ] && [ -f "$VERIFICADO/$1.log" ] \
+        && [ "$(cat "$VERIFICADO/$1.clave")" = "$FPGA_KEY" ] || return 1
+    echo "== sin cambios en rtl/, constraints/ ni verif/fpga/ desde la última $1 verificada"
+    echo "== ($FPGA_KEY): se muestra su resultado (TP4_REHACER=1 para rehacerla)"
+    cat "$VERIFICADO/$1.log"
+}
+save_verified() {   # save_verified <capa> <log>: la capa dio PASS con la huella FPGA_KEY
+    [ "$FPGA_KEY" = 0 ] && return
+    mkdir -p "$VERIFICADO"
+    grep -v '^== sin cambios en rtl/\|^== (.*): se muestra su resultado' "$2" > "$VERIFICADO/$1.log"
+    echo "$FPGA_KEY" > "$VERIFICADO/$1.clave"
+}
+forget_verified() { local l; for l in "$@"; do rm -f "$VERIFICADO/$l".*; done; }
 vivado_batch() {   # vivado_batch <script.tcl> <log>
     (cd "$PROJ/build/vivado" && vivado -mode batch -nojournal -log "$2" -source "$1" > /dev/null)
 }
 run_sintesis() {
+    reused sintesis && return 0
+    forget_verified sintesis implementacion; rm -rf "$PROJ/build/bitstream"
     export TP4_BUILD_ID; TP4_BUILD_ID=$(build_id)
     echo "BUILD_ID = $TP4_BUILD_ID"
-    mkdir -p "$PROJ/build/vivado"
+    mkdir -p "$PROJ/build/vivado" "$VERIFICADO"
+    echo "$TP4_BUILD_ID" > "$VERIFICADO/sintesis.build_id"   # el que quedó en el netlist
     vivado_batch "$PWD/fpga/create_project.tcl" "$REPORTS/vivado_proyecto.log" || return 1
     vivado_batch "$PWD/fpga/synth.tcl" "$REPORTS/vivado_sintesis.log" || return 1
     cp "$PROJ/build/vivado/tp4.runs/synth_1/runme.log" "$REPORTS/sintesis_vivado.log"
@@ -120,29 +161,65 @@ run_sintesis() {
         "$inf/utilizacion_sintesis_jerarquica.rpt" | tee "$inf/utilizacion.md" | sed 's/^/      /'
     return $rc
 }
-run_placa() {
-    # programa la FPGA con el bitstream de la implementación verificada (la de la capa
-    # implementacion); PLACA_PROGRAMAR=0 la deja como está (por ejemplo, programada desde
-    # la GUI). Si el bitstream no es el del commit, el chequeo de versión de run.py falla.
-    if [ "${PLACA_PROGRAMAR:-1}" = 1 ]; then
-        if vivado_batch "$PWD/placa/program.tcl" "$REPORTS/vivado_programa.log" \
-           && grep -q "TP4_PROGRAMADA" "$REPORTS/vivado_programa.log"; then
-            echo "[ok ] FPGA programada con el bitstream de la implementación verificada"
-        else
-            echo "[MAL] no se pudo programar la FPGA: $(grep -m1 TP4_ERROR "$REPORTS/vivado_programa.log")"
-            return 1
-        fi
+run_bitstream() {
+    # Solo de una implementación verificada (PASS de la capa implementacion) del hardware
+    # actual: así el bitstream que se programa es el que pasó el STA.
+    local want have bit
+    want=$(build_id); have=$(cat "$VERIFICADO/implementacion.build_id" 2>/dev/null || echo ninguna)
+    if [ "$want" = 0 ]; then
+        echo "[MAL] el hardware (RTL, constraints o tcl de verif/fpga/) tiene cambios sin commitear: no hay versión"
+        return 1
+    elif [ "$have" = "$want" ]; then
+        echo "[ok ] hay una implementación verificada del hardware actual (BUILD_ID $want)"
+    else
+        echo "[MAL] la implementación verificada es de $have y el hardware actual es $want: correr sintesis e implementacion"
+        return 1
     fi
+    vivado_batch "$PWD/fpga/bitstream.tcl" "$REPORTS/vivado_bitstream.log"
+    sed -n 's/^TP4_OK: /[ok ] /p; s/^TP4_ERROR: /[MAL] /p' "$REPORTS/vivado_bitstream.log"
+    bit=$(sed -n 's/^TP4_BIT: //p' "$REPORTS/vivado_bitstream.log")
+    [ -n "$bit" ] && [ -f "$bit" ] || return 1
+    rm -rf "$PROJ/build/bitstream"; mkdir -p "$PROJ/build/bitstream"
+    cp "$bit" "$PROJ/build/bitstream/top_riscv.bit"
+    echo "$want" > "$PROJ/build/bitstream/build_id"
+    echo "      bitstream: $PROJ/build/bitstream/top_riscv.bit (BUILD_ID $want)"
+}
+run_programar() {
+    local want have
+    want=$(build_id); have=$(cat "$PROJ/build/bitstream/build_id" 2>/dev/null || echo ninguno)
+    if [ "$want" != 0 ] && [ "$have" = "$want" ]; then
+        echo "[ok ] el bitstream es del hardware actual (BUILD_ID $want)"
+    else
+        [ "$want" = 0 ] && want="sin versión (cambios sin commitear)"
+        echo "[MAL] el bitstream es de $have y el hardware actual es $want: correr la capa bitstream (o fpga)"
+        return 1
+    fi
+    TP4_BIT="$PROJ/build/bitstream/top_riscv.bit" \
+        vivado_batch "$PWD/placa/program.tcl" "$REPORTS/vivado_programa.log"
+    if grep -q "^TP4_PROGRAMADA" "$REPORTS/vivado_programa.log"; then
+        echo "[ok ] FPGA programada por JTAG ($(sed -n 's/^TP4_DONE: /DONE = /p' "$REPORTS/vivado_programa.log"))"
+    else
+        echo "[MAL] no se pudo programar la FPGA: $(grep -m1 TP4_ERROR "$REPORTS/vivado_programa.log")"
+        return 1
+    fi
+}
+run_placa() {
+    # prueba lo que tenga cargado la FPGA (capa programar, o la GUI de Vivado); el chequeo
+    # de versión de run.py falla si no es el hardware actual
     sim/build.sh placa > /dev/null || return 1
     echo "BUILD_ID esperado = $(build_id)   puerto = $PLACA_PUERTO"
     python3 placa/run.py --puerto "$PLACA_PUERTO" --build-id "$(build_id)" --sim "$PROJ/build/sim/placa/Vtb"
 }
 run_implementacion() {
+    reused implementacion && return 0
+    forget_verified implementacion; rm -rf "$PROJ/build/bitstream"
     [ -f "$PROJ/build/vivado/tp4.xpr" ] || { echo "no hay proyecto: correr antes la capa sintesis"; return 1; }
     local rep="$REPORTS/implementacion"; rm -rf "$rep"
     TP4_REPORT_DIR="$rep" vivado_batch "$PWD/fpga/impl.tcl" "$REPORTS/vivado_implementacion.log" || return 1
     python3 fpga/check_impl.py "$PROJ/build/vivado/tp4.runs/impl_1/runme.log" "$rep" fpga/waivers.txt
     local rc=$?
+    # la versión que tiene esta implementación (la de la síntesis que usó)
+    [ $rc -eq 0 ] && cp "$VERIFICADO/sintesis.build_id" "$VERIFICADO/implementacion.build_id" 2> /dev/null
     # resumen para la presentación (información, no es un chequeo): recursos, camino
     # crítico y potencia, sin actividad simulada y con la de fpga/potencia/ (si se puede
     # simular con xsim; si no, queda solo la primera)
@@ -172,7 +249,7 @@ while [ $# -gt 0 ]; do
     case $1 in
         --lista|-l) list_layers; exit 0 ;;
         --variante) VARIANT=${2:?falta el nombre de la variante}; shift ;;
-        -h|--help)  sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help)  sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *)  if [ -n "${LAYER_GROUPS[$1]:-}" ]; then SELECTED+=(${LAYER_GROUPS[$1]})
             elif layer_field "$1" 1 > /dev/null; then SELECTED+=("$1")
             else echo "capa o grupo desconocido: $1 (ver ./run.sh --lista)"; exit 1; fi ;;
@@ -199,6 +276,7 @@ for layer in "${SELECTED[@]}"; do
     else
         [ -t 1 ] && printf '%-15s ...\r' "$layer"
         t0=$SECONDS
+        FPGA_KEY=$(version_of "${FPGA_FILES[@]}")
         "run_$layer" > "$log" 2>&1; rc=$?
         TIME[$layer]=$((SECONDS - t0))
         n_ok=$(grep -c '^\[ok \]' "$log"); n_bad=$(grep -c '^\[MAL\]' "$log")
@@ -210,6 +288,7 @@ for layer in "${SELECTED[@]}"; do
             [ "$n_bad" -eq 0 ] && DETAIL[$layer]+=" (el script terminó con código $rc)"
         else
             RESULT[$layer]=PASS; DETAIL[$layer]="$n_ok/$total"
+            case $layer in sintesis|implementacion) save_verified "$layer" "$log" ;; esac
         fi
     fi
     case ${RESULT[$layer]} in
@@ -253,3 +332,4 @@ tool_version() { command -v "$1" > /dev/null && "$@" 2>&1 | head -1 || echo "no 
 } > "$REPORTS/resumen.md"
 echo "Resumen: $REPORTS/resumen.md"
 exit $STATUS
+}

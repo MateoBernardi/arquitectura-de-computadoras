@@ -89,7 +89,7 @@ requiere tocar el XDC.
 genera un script desde los fuentes.
 
 ```bash
-verif/run.sh fpga      # crea build/vivado/tp4.xpr, sintetiza, implementa, verifica y programa la placa
+verif/run.sh fpga      # crea build/vivado/tp4.xpr, sintetiza, implementa, genera el bitstream, programa la placa y la prueba
 ```
 
 También se puede abrir `build/vivado/tp4.xpr` en la GUI y usar *Generate Bitstream* y
@@ -130,7 +130,8 @@ verif/tools/install.sh        # instala las herramientas (una vez)
 verif/run.sh --lista          # las capas y qué herramienta le falta a cada una
 verif/run.sh                  # todo
 verif/run.sh rapido           # sin riscv-formal ni Vivado (~6 min)
-verif/run.sh fpga             # síntesis, implementación y placa
+verif/run.sh fpga             # síntesis, implementación, bitstream y placa
+verif/run.sh programar placa  # reprogramar la placa con el último bitstream y probarla
 verif/run.sh act traps        # capas sueltas
 ```
 
@@ -144,6 +145,7 @@ verif/run.sh act traps        # capas sueltas
 | `sistema` | el sistema completo simulado, manejado por la UART |
 | `host` | el software de la PC |
 | `sintesis`, `implementacion` | Vivado: que el netlist sea lo que pide el RTL, y el timing |
+| `bitstream`, `programar` | el bitstream de la implementación verificada, cargado por JTAG |
 | `placa` | la FPGA real, comparada contra la simulación |
 
 Cada capa da PASS solo si corrió al menos una prueba y todas dieron bien; si falta una

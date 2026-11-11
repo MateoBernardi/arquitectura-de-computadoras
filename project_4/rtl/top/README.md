@@ -109,7 +109,7 @@ bajo, como en la placa.
 | `N_TICKS` | 16 | muestras por bit de la UART |
 | `PTR_LEN` | 2 | profundidad de las colas de la UART: 4 bytes |
 | `IMEM_ADDR_W` | 10 | imem de 1 KB (256 instrucciones) |
-| `BUILD_ID` | 0 | versión del RTL; la síntesis le pasa el commit (ver abajo) |
+| `BUILD_ID` | 0 | versión del hardware; la síntesis le pasa un commit (ver abajo) |
 
 ## El reloj
 
@@ -128,10 +128,11 @@ enganchó (`locked`), el sistema queda en reset.
 ## La palabra de versión
 
 La debug unit lee del CPU un mapa de 89 palabras; `top_riscv` le agrega una al final (la
-89): `BUILD_ID`, el commit del RTL con que se sintetizó. `verif/fpga/synth.tcl` lo pasa
-como parámetro (si `rtl/` y `constraints/` no tienen cambios sin commitear; si no, 0), el
+89): `BUILD_ID`, la versión del hardware con que se sintetizó: el último commit que cambió
+`rtl/`, `constraints/` o los tcl de síntesis e implementación (0 si tienen cambios sin
+commitear). `verif/run.sh` lo calcula y `verif/fpga/synth.tcl` lo pasa como parámetro; el
 host lo muestra, y la verificación en la placa lo usa para comprobar que el bitstream
-cargado es el del commit que se está probando.
+cargado es el del hardware que se está probando.
 
 ## Puertos asíncronos
 

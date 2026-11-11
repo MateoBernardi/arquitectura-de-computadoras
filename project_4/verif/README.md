@@ -1,7 +1,7 @@
 # verif/ — verificación del proyecto
 
-Sigue las 5 etapas del flujo: RTL → síntesis → implementación → bitstream → placa. Son 9
-capas de prueba repartidas en esas etapas, más una para el software del host: 10 en total
+Sigue las 5 etapas del flujo: RTL → síntesis → implementación → bitstream → placa. Son 11
+capas de prueba repartidas en esas etapas, más una para el software del host: 12 en total
 (ver la tabla de capas más abajo). Para el RTL usa herramientas libres (Yosys, SymbiYosys, solvers SMT,
 [riscv-formal](https://github.com/YosysHQ/riscv-formal), Verilator, Icarus,
 riscv-arch-test); Vivado solo hace falta para las etapas de FPGA.
@@ -22,7 +22,8 @@ Si una herramienta no está en `TOOLS_DIR`, se usa la del sistema.
 ```bash
 ./run.sh                           # todas las capas (~35 min)
 ./run.sh rapido                    # todo menos riscv-formal y Vivado (~6 min)
-./run.sh fpga                      # síntesis, implementación y placa (~12 min, Vivado y la placa)
+./run.sh fpga                      # síntesis, implementación, bitstream y placa (~12 min, Vivado y la placa)
+./run.sh programar placa           # solo programar la FPGA con el último bitstream y probarla (~3 min)
 ./run.sh act traps                 # solo algunas capas
 ./run.sh --variante hazard_unit_precise rvfi act traps    # una variante
 ./run.sh --lista                   # capas, grupos y herramientas
@@ -52,12 +53,27 @@ y las versiones de las herramientas. Todo lo generado va a `build/`.
 | RTL | `sistema` | el sistema completo (UART + debug unit + CPU), manejado por la línea serie |
 | síntesis | `sintesis` | Vivado: el netlist es lo que pide el RTL (avisos justificados, sin latches, memorias), con mutantes |
 | implementación | `implementacion` | Vivado: STA completo (nada sin restringir; setup, hold, pulso), cruces de reloj, ruteo, DRC |
-| placa | `placa` | genera el bitstream, programa la FPGA y la prueba por la UART: versión, programas y traps comparados contra la simulación, comandos de la debug unit ([`placa/README.md`](placa/README.md)) |
+| bitstream | `bitstream` | Vivado: genera el bitstream desde la implementación verificada del hardware actual (con el DRC de `write_bitstream`) |
+| placa | `programar` | programa la FPGA por JTAG con ese bitstream y comprueba que terminó de configurarse (DONE) |
+| placa | `placa` | la FPGA por la UART: versión, programas y traps comparados contra la simulación, comandos de la debug unit ([`placa/README.md`](placa/README.md)) |
 | fuera del flujo | `host` | el software de la PC: protocolo, desensamblador y GUI |
 
-La etapa de bitstream no tiene capa propia: el bitstream se genera dentro de `placa`, y
-`placa` controla con `BUILD_ID` que corresponda al commit. `host` prueba el software de
-la PC, que no pasa por el flujo. Las capas de FPGA, y por qué no hay simulación de netlist,
+La etapa de placa tiene dos capas: `programar` (JTAG) y `placa` (las pruebas), para poder
+repetir las pruebas o reprogramar sin volver a pasar por Vivado. `host` prueba el software
+de la PC, que no pasa por el flujo.
+
+**Versión del hardware (`BUILD_ID`).** Es el último commit que cambió algo de lo que entra
+al bitstream: `rtl/`, `constraints/` y los tcl de síntesis e implementación de `verif/fpga/`.
+Un commit que solo toca documentación, tests o el host no la cambia, así que no obliga a
+sintetizar de nuevo ni invalida la placa programada. Con cambios sin commitear en esos
+archivos vale 0 (sin versión). `bitstream` solo acepta una implementación verificada de la
+versión actual, `programar` solo carga un bitstream de esa versión, y `placa` comprueba que
+la FPGA la tenga.
+
+**Reutilización.** `sintesis` e `implementacion` guardan su resultado cuando dan PASS
+(`build/verificado/`). Si después no cambió nada en `rtl/`, `constraints/` ni `verif/fpga/`,
+la próxima corrida muestra ese resultado en lugar de volver a correr Vivado.
+`TP4_REHACER=1 verif/run.sh fpga` las rehace igual. Las capas de FPGA, y por qué no hay simulación de netlist,
 están en
 [`fpga/README.md`](fpga/README.md).
 

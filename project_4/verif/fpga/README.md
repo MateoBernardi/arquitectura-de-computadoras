@@ -1,8 +1,10 @@
 # verif/fpga/ — síntesis, implementación y frecuencia máxima
 
-Las etapas del flujo que necesitan Vivado: RTL → **síntesis → implementación** →
-bitstream → placa. Se corren con `verif/run.sh fpga` (capas `sintesis` e
-`implementacion`).
+Las etapas del flujo que necesitan Vivado: RTL → **síntesis → implementación →
+bitstream** → placa. Se corren con `verif/run.sh fpga` (capas `sintesis`, `implementacion`
+y `bitstream`). Si `rtl/`, `constraints/` y `verif/fpga/` no cambiaron desde la última
+corrida verificada, `sintesis` e `implementacion` muestran ese resultado sin correr Vivado
+(ver [`../README.md`](../README.md)).
 
 | Archivo | Qué hace |
 |---|---|
@@ -12,6 +14,7 @@ bitstream → placa. Se corren con `verif/run.sh fpga` (capas `sintesis` e
 | `synth_mutants.sh` | sintetiza un RTL con errores inyectados y comprueba que `check_synth.py` los detecte |
 | `impl.tcl` | place & route y los reportes de STA, ruteo, DRC y metodología |
 | `check_impl.py` | revisa esos reportes |
+| `bitstream.tcl` | genera el bitstream de la implementación ya verificada (no implementa de nuevo) |
 | `waivers.txt` | los avisos de Vivado que son lo que pide el RTL, cada uno con su motivo |
 | `fmax.sh` | busca la frecuencia máxima a la que el diseño cierra timing |
 
@@ -155,10 +158,11 @@ patrones son fallos en `sintesis`, el timing lo prueba el STA para todos los cam
 que una simulación con timing), y la capa `placa` corre programas en el chip real y los
 compara contra la simulación del RTL.
 
-**Sin capa de bitstream.** `write_bitstream` traduce la implementación ya ruteada, y su
-propio DRC frena si hay un problema. La trazabilidad (que el bitstream corresponda a un
-commit) la verifica la capa `placa`, que lee `BUILD_ID` del dump y lo compara con el commit.
-El bitstream se genera al programar la placa (`verif/placa/program.tcl` o la GUI).
+**La capa de bitstream es corta.** `write_bitstream` traduce la implementación ya ruteada,
+y su propio DRC frena si hay un problema. La capa `bitstream` comprueba que parta de una
+implementación verificada de la versión actual del hardware, que `write_bitstream` termine,
+y deja el resultado en `build/bitstream/top_riscv.bit` con su `BUILD_ID`. Que la FPGA tenga
+ese bitstream lo comprueba la capa `placa`, que lee `BUILD_ID` del dump.
 
 **Vivado para la síntesis, y no Yosys con equivalencia formal.** Se evaluó sintetizar con
 Yosys, probar formalmente que su netlist es equivalente al RTL, y usar Vivado solo para

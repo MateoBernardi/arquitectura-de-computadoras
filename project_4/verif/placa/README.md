@@ -1,24 +1,26 @@
 # verif/placa/ — el sistema en la FPGA real
 
 La última etapa del flujo: el bitstream cargado en la Nexys4 DDR, manejado por la UART
-igual que lo hace el host. Se corre con `verif/run.sh placa`.
+igual que lo hace el host. Son dos capas: `programar` (carga el bitstream por JTAG) y
+`placa` (las pruebas). Se corren con `verif/run.sh programar placa`.
 
 | Archivo | Qué hace |
 |---|---|
-| `program.tcl` | genera el bitstream desde la implementación ya verificada y configura la FPGA por JTAG (lo mismo que "Generate Bitstream" + "Program Device" en la GUI) |
+| `program.tcl` | configura la FPGA por JTAG con `build/bitstream/top_riscv.bit` y lee el pin DONE (lo mismo que "Program Device" en la GUI) |
 | `run.py` | las pruebas, por la UART |
 
 ## Antes de correr la capa
 
 La FPGA se configura por **JTAG** (la UART del diseño existe recién después de cargar el
-bitstream). La capa lo hace sola: antes de las pruebas corre `program.tcl`, que genera el
-bitstream de la implementación que verificó la capa `implementacion` y lo carga. Así
-`verif/run.sh fpga` (o `todo`) va del RTL a la placa probada en un solo comando.
+bitstream). Lo hace la capa `programar`, con el bitstream que dejó la capa `bitstream` en
+`build/bitstream/` (generado de la implementación verificada). Solo lo carga si es de la
+versión actual del hardware (ver `BUILD_ID` en [`../README.md`](../README.md)).
+`verif/run.sh fpga` (o `todo`) va del RTL a la placa probada en un solo comando; si el
+hardware no cambió, `verif/run.sh programar placa` alcanza.
 
-Para programarla a mano: `vivado -mode batch -source verif/placa/program.tcl`, o en la GUI
-abrir `build/vivado/tp4.xpr` → *Generate Bitstream* → *Program Device*. Con
-`PLACA_PROGRAMAR=0 verif/run.sh placa` la capa no la programa y prueba lo que tenga cargado
-(si no es el bitstream del commit, falla el chequeo de versión).
+También se puede programar con la GUI (abrir `build/vivado/tp4.xpr` → *Generate Bitstream* →
+*Program Device*) y después correr solo `verif/run.sh placa`: la capa prueba lo que tenga
+cargado la FPGA, y si no es la versión actual del hardware falla el chequeo de versión.
 La configuración por JTAG es volátil: no toca la flash y se pierde al apagar la placa.
 
 El puerto serie es el segundo canal del chip USB de la placa: `/dev/ttyUSB1` por defecto
@@ -33,7 +35,7 @@ tiene que terminar en el hardware igual que en la simulación.
 
 | Grupo | Qué compara |
 |---|---|
-| versión | `BUILD_ID` (última palabra del dump) es el commit que se está probando; si el RTL tiene cambios sin commitear, falla: no hay con qué comparar |
+| versión | `BUILD_ID` (última palabra del dump) es la versión actual del hardware; si el hardware tiene cambios sin commitear, falla: no hay con qué comparar |
 | programas (`programs/*.s`) | ciclos, x1..x31, las 32 palabras de la dmem que muestra el dump, y causa, PC y dirección del halt |
 | traps (`verif/sim/tests/traps/*.S`) | lo mismo, para cada causa de trap |
 | comandos de la debug unit | step, run, reset (borra registros, conserva el programa), pausa, trap por instrucción ilegal, programa demasiado grande (`E`), comando desconocido (`?`): los escenarios de `verif/system/`, ahora en hardware |
