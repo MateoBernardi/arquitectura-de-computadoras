@@ -21,10 +21,10 @@ PY
 # 1. latch: tval no se asigna en todos los caminos del always combinacional
 mutate pipeline/flow/trap_unit.v "            tval  = addr;" "            if (mem) tval  = addr;"
 # 2. lógica secuencial que Vivado elimina (un registro que nadie lee)
-mutate top/top_riscv.v "    assign o_led = {cpu_halt, cpu_reset, cpu_enable};" \
+mutate top/top_riscv.v "    // Bus de debug: las palabras del CPU y, al final, BUILD_ID" \
 "    reg [7:0] dead_reg;
     always @(posedge clk) dead_reg <= rx_data;
-    assign o_led = {cpu_halt, cpu_reset, cpu_enable};"
+    // Bus de debug: las palabras del CPU y, al final, BUILD_ID"
 
 export TP4_RTL_DIR="$WORK/rtl" TP4_PROJECT_DIR="$WORK/vivado"
 vivado -mode batch -nojournal -log "$WORK/vivado.log" -source "$HERE/create_project.tcl" > /dev/null || exit 1
