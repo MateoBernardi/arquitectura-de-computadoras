@@ -10,6 +10,9 @@
 //   +estado               al detenerse imprime x1..x31, las palabras 0..31 de la dmem y el
 //                         trap, y termina sin juzgar (lo usa verif/placa para comparar)
 //   +dmem-en-cero         no carga la imagen en la dmem (como la placa: 'L' carga la imem)
+//   +perfil               al detenerse imprime, por categoría de instrucción, cuántas se
+//                         retiraron y cuántos ciclos de penalización causaron (lo usa
+//                         perfil.py para el desglose del CPI)
 //
 // Al detenerse informa ciclos, instrucciones retiradas (rvfi_valid, la misma
 // interfaz que usa riscv-formal) y una firma del estado final (x1..x31 y las 256
@@ -84,6 +87,52 @@ module tb #(
     longint instret = 0;
     always @(posedge clk) if (rvfi_valid) instret <= instret + 1;
 
+    // ------------------------------------------------------------- perfil
+    // Cada instrucción retirada cuenta en su categoría (por el opcode de rvfi_insn). Los
+    // ciclos perdidos se cargan a la instrucción que los causa, mirando las señales del
+    // pipeline en cada ciclo:
+    //   - stall de load-use: 1 ciclo, al load que está en EX;
+    //   - redirect (branch tomado, jal, jalr resuelto en EX): 2 ciclos, las dos
+    //     instrucciones del camino equivocado que se descartan.
+    // Lo que sobra (ciclos - instrucciones - penalizaciones) es el llenado y vaciado del
+    // pipeline al principio y al final.
+    localparam int NCAT = 10;
+    localparam int C_ALU_R = 0, C_ALU_I = 1, C_LUI_AUIPC = 2, C_LOAD = 3, C_STORE = 4,
+                   C_BR_T = 5, C_BR_NT = 6, C_JAL = 7, C_JALR = 8, C_SYSTEM = 9;
+    longint cat_n   [NCAT];
+    longint cat_pen [NCAT];
+    bit     perfil;
+    initial begin
+        perfil = $test$plusargs("perfil");
+        for (int c = 0; c < NCAT; c++) begin cat_n[c] = 0; cat_pen[c] = 0; end
+    end
+    function automatic int categoria(input [31:0] insn, input bit tomado);
+        case (insn[6:0])
+            7'b0110011: return C_ALU_R;
+            7'b0010011: return C_ALU_I;
+            7'b0110111, 7'b0010111: return C_LUI_AUIPC;
+            7'b0000011: return C_LOAD;
+            7'b0100011: return C_STORE;
+            7'b1100011: return tomado ? C_BR_T : C_BR_NT;
+            7'b1101111: return C_JAL;
+            7'b1100111: return C_JALR;
+            default:    return C_SYSTEM;
+        endcase
+    endfunction
+    always @(posedge clk) if (!rst && !halt) begin
+        if (rvfi_valid)
+            cat_n[categoria(rvfi_insn, rvfi_pc_wdata != rvfi_pc_rdata + 4)] += 1;
+        if (dut.stall) cat_pen[C_LOAD] += 1;
+        if (dut.redirect)
+            cat_pen[dut.ex_is_jalr ? C_JALR : dut.ex_jump ? C_JAL : C_BR_T] += 2;
+    end
+    task automatic imprimir_perfil();
+        string nom [NCAT] = '{"alu_r", "alu_i", "lui_auipc", "load", "store",
+                              "branch_tomado", "branch_no_tomado", "jal", "jalr", "system"};
+        for (int c = 0; c < NCAT; c++)
+            $display("tb: perfil %s n=%0d penal=%0d", nom[c], cat_n[c], cat_pen[c]);
+    endtask
+
     // firma FNV-1a del estado final
     function automatic [31:0] signature();
         reg [31:0] h;
@@ -110,6 +159,11 @@ module tb #(
             $display("tb: halt  ciclos=%0d  instrucciones=%0d  causa=%0d  pc=%08h  tval=%08h  tohost=%0d  firma=%08h",
                      cycles, instret + 1, dut.trap_cause, dut.trap_pc, dut.trap_tval, tohost,
                      signature());
+            if (perfil) begin
+                // la que detuvo el CPU está en WB en este ciclo (rvfi_valid no la marca)
+                cat_n[C_SYSTEM] += 1;
+                imprimir_perfil();
+            end
             if (estado) begin
                 for (r = 1; r < 32; r = r + 1) $display("tb: x%0d = %08h", r, dut.u_rf.regs[r]);
                 for (r = 0; r < 32; r = r + 1)

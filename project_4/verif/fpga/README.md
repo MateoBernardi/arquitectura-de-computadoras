@@ -48,6 +48,26 @@ entradas pasan por un sincronizador `sync_2ff`. Por eso en el XDC están excluid
 análisis con `set_false_path`, con el motivo escrito. `check_timing` los informa como
 excluidos a propósito; un puerto **sin ninguna** restricción es un fallo.
 
+## Informes para la presentación (no son chequeos)
+
+Las capas dejan, además de los chequeos, información sobre el diseño. No falla nada por
+estos números: no hay valores esperados contra los que compararlos.
+
+| Informe | Lo deja | Qué tiene |
+|---|---|---|
+| `build/reports/sintesis/utilizacion.md` | capa `sintesis` (al final del log) | recursos del netlist sintetizado, total y por módulo |
+| `build/reports/implementacion/informe.md` | capa `implementacion` (`informe.py`) | recursos después del place & route, el camino crítico tramo por tramo, la distribución de niveles de lógica y la potencia |
+| `build/reports/implementacion/potencia_*.rpt` | `impl.tcl` y `potencia/potencia.sh` | potencia estimada por Vivado, sin y con actividad simulada |
+
+**Potencia con actividad (`potencia/`).** `report_power` sin más datos supone una tasa de
+conmutación por defecto para cada señal. `potencia.sh` simula el sistema (RTL, en xsim)
+corriendo la criba en bucle durante 2 ms después de recibir `R` por la UART, guarda la
+actividad de cada señal (SAIF) y se la pasa a `report_power`. Vivado aparea por nombre las
+señales del SAIF con las del netlist (registros y puertos, ~11 % de las redes) y propaga el
+resto, y dice cuántas apareó. Es una estimación: la Nexys4 DDR no mide la corriente de la
+FPGA. En Ubuntu 24.04, xsim necesita `libtinfo.so.5`, que ya no viene con el sistema; si
+falta, el informe queda solo con la estimación sin actividad.
+
 ## Frecuencia máxima (`fmax.sh`)
 
 Sintetiza e implementa el diseño a 50, 60, 70, 80, 90 y 100 MHz, en ese orden, y se

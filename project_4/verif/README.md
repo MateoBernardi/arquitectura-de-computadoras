@@ -52,7 +52,7 @@ y las versiones de las herramientas. Todo lo generado va a `build/`.
 | `host` | el software de la PC: protocolo, desensamblador y GUI |
 | `sintesis` | Vivado: el netlist es lo que pide el RTL (avisos justificados, sin latches, memorias), con mutantes |
 | `implementacion` | Vivado: STA completo (nada sin restringir; setup, hold, pulso), cruces de reloj, ruteo, DRC |
-| `placa` | la FPGA real por la UART: versión, programas y traps comparados contra la simulación, comandos de la debug unit ([`placa/README.md`](placa/README.md)) |
+| `placa` | programa la FPGA con el bitstream verificado y la prueba por la UART: versión, programas y traps comparados contra la simulación, comandos de la debug unit ([`placa/README.md`](placa/README.md)) |
 
 Las capas de FPGA, y por qué no hay simulación de netlist ni capa de bitstream, están en
 [`fpga/README.md`](fpga/README.md).
@@ -146,12 +146,10 @@ hace exactamente los ciclos del diseño anterior):
 | ACT (39 tests) | CPI 1,335 → 37,5 MIPS | CPI 1,236 → 48,5 MIPS | CPI 1,335 → **52,4 MIPS** | +8 % |
 | suma_arreglo (load-use en cada iteración) | 1,616 → 30,9 | 1,492 → 40,2 | 1,616 → **43,3** | +8 % |
 | criba | 1,419 → 35,2 | 1,407 → 42,6 | 1,419 → **49,3** | +16 % |
-| CoreMark | 1,443 → 34,6 | 1,414 → 42,4 | 1,443 → **48,5** | +14 % |
-| Dhrystone | 1,257 → 39,8 | 1,239 → 48,4 | 1,257 → **55,7** | +15 % |
 
 **Se adoptó B.** Gana en todas las cargas, incluso en `suma_arreglo`, el peor caso para
 B (usa cada dato justo después de cargarlo): el stall de load-use cuesta como mucho un 8 %
-de los ciclos, y en los benchmarks un 1,4–2 %, mientras que B corre un 17 % más rápido.
+de los ciclos, mientras que B corre un 17 % más rápido.
 Contra el diseño anterior, B es un 40 % más rápido con los mismos ciclos.
 
 Desde B, el stall es necesario: el mutante `no_stall` de riscv-formal lo comprueba (ver
@@ -172,9 +170,10 @@ verif/
 │   └── show_trace.py     muestra contraejemplos como tabla, con el programa desensamblado
 ├── formal/               verificación formal: forward_unit/ hazard_unit/ pipeline_control/
 │                         datapath/ rvfi/ (riscv-formal) y common/imem_formal.v
-├── sim/                  simulación con Verilator: ACT, traps, rendimiento
+├── sim/                  simulación con Verilator: ACT, traps, rendimiento y desglose del CPI
 ├── system/               el sistema completo (UART + debug unit + CPU), con Icarus
-├── fpga/                 Vivado: crear el proyecto, síntesis, implementación, frecuencia máxima
+├── fpga/                 Vivado: crear el proyecto, síntesis, implementación, frecuencia máxima,
+│                         informes (recursos, camino crítico) y potencia (potencia/)
 ├── placa/                la FPGA real: programarla (JTAG) y probarla por la UART
 └── variants/             módulos alternativos para evaluar ideas
 ```

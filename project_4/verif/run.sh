@@ -33,7 +33,7 @@ LAYERS=(
 "host|el software de la PC: protocolo UART, desensamblador y GUI|cmd:python3 py:tkinter"
 "sintesis|Vivado: el netlist es lo que pide el RTL (avisos justificados, sin latches, memorias), con mutantes|cmd:vivado"
 "implementacion|Vivado: STA completo (nada sin restringir; setup, hold, pulso), cruces de reloj, ruteo, DRC|cmd:vivado"
-"placa|la FPGA real por la UART: versión, programas y traps comparados contra la simulación, comandos|cmd:verilator cmd:riscv-none-elf-gcc dir:riscv-formal py:serial dev:placa"
+"placa|la FPGA real por la UART (la programa antes por JTAG): versión, programas y traps comparados contra la simulación, comandos|cmd:verilator cmd:riscv-none-elf-gcc cmd:vivado dir:riscv-formal py:serial dev:placa"
 )
 declare -A LAYER_GROUPS=(
     [todo]="formal rvfi act traps rendimiento sistema host sintesis implementacion placa"
@@ -82,7 +82,11 @@ run_rvfi() {
 }
 run_act()         { VARIANT="$VARIANT" sim/run_act.sh; }
 run_traps()       { VARIANT="$VARIANT" sim/run_traps.sh; }
-run_rendimiento() { sim/bench.py; }
+run_rendimiento() {
+    sim/bench.py || return 1
+    # información, no es un chequeo: el desglose del CPI de cada programa
+    python3 sim/perfil.py > /dev/null && echo "      desglose del CPI: $REPORTS/perfil.md"
+}
 run_sistema()     { system/run.sh; }
 run_host()        { python3 tools/pyunit.py "$PROJ/host/tests"; }
 
@@ -107,9 +111,27 @@ run_sintesis() {
     python3 fpga/check_synth.py "$REPORTS/sintesis_vivado.log" "$RTL_DIR" fpga/waivers.txt || rc=1
     echo "== mutantes (cada uno tiene que ser detectado)"
     fpga/synth_mutants.sh || rc=1
+    # al final, como información (no es un chequeo): los recursos del netlist
+    local inf="$REPORTS/sintesis"; rm -rf "$inf"; mkdir -p "$inf"
+    cp "$PROJ/build/vivado/informes/"*.rpt "$inf/" 2> /dev/null
+    echo "== utilización del netlist sintetizado (información, no es un chequeo)"
+    python3 fpga/informe.py utilizacion "$inf/utilizacion_sintesis.rpt" \
+        "$inf/utilizacion_sintesis_jerarquica.rpt" | tee "$inf/utilizacion.md" | sed 's/^/      /'
     return $rc
 }
 run_placa() {
+    # programa la FPGA con el bitstream de la implementación verificada (la de la capa
+    # implementacion); PLACA_PROGRAMAR=0 la deja como está (por ejemplo, programada desde
+    # la GUI). Si el bitstream no es el del commit, el chequeo de versión de run.py falla.
+    if [ "${PLACA_PROGRAMAR:-1}" = 1 ]; then
+        if vivado_batch "$PWD/placa/program.tcl" "$REPORTS/vivado_programa.log" \
+           && grep -q "TP4_PROGRAMADA" "$REPORTS/vivado_programa.log"; then
+            echo "[ok ] FPGA programada con el bitstream de la implementación verificada"
+        else
+            echo "[MAL] no se pudo programar la FPGA: $(grep -m1 TP4_ERROR "$REPORTS/vivado_programa.log")"
+            return 1
+        fi
+    fi
     sim/build.sh placa > /dev/null || return 1
     echo "BUILD_ID esperado = $(build_id)   puerto = $PLACA_PUERTO"
     python3 placa/run.py --puerto "$PLACA_PUERTO" --build-id "$(build_id)" --sim "$PROJ/build/sim/placa/Vtb"
@@ -119,6 +141,15 @@ run_implementacion() {
     local rep="$REPORTS/implementacion"; rm -rf "$rep"
     TP4_REPORT_DIR="$rep" vivado_batch "$PWD/fpga/impl.tcl" "$REPORTS/vivado_implementacion.log" || return 1
     python3 fpga/check_impl.py "$PROJ/build/vivado/tp4.runs/impl_1/runme.log" "$rep" fpga/waivers.txt
+    local rc=$?
+    # resumen para la presentación (información, no es un chequeo): recursos, camino
+    # crítico y potencia, sin actividad simulada y con la de fpga/potencia/ (si se puede
+    # simular con xsim; si no, queda solo la primera)
+    TP4_REPORT_DIR="$rep" fpga/potencia/potencia.sh > "$REPORTS/potencia.log" 2>&1 \
+        || echo "      (sin potencia con actividad simulada: ver $REPORTS/potencia.log)"
+    python3 fpga/informe.py implementacion "$rep" "$rep/potencia_saif.rpt" > "$rep/informe.md" \
+        && echo "      informe (recursos, camino crítico, potencia): $rep/informe.md"
+    return $rc
 }
 
 # --- argumentos ---------------------------------------------------------------------

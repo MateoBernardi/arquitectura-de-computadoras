@@ -11,14 +11,14 @@ igual que lo hace el host. Se corre con `verif/run.sh placa`.
 ## Antes de correr la capa
 
 La FPGA se configura por **JTAG** (la UART del diseño existe recién después de cargar el
-bitstream). Las dos formas sirven:
+bitstream). La capa lo hace sola: antes de las pruebas corre `program.tcl`, que genera el
+bitstream de la implementación que verificó la capa `implementacion` y lo carga. Así
+`verif/run.sh fpga` (o `todo`) va del RTL a la placa probada en un solo comando.
 
-```bash
-verif/run.sh fpga                                               # síntesis + implementación verificadas
-vivado -mode batch -source verif/placa/program.tcl              # bitstream + programar
-```
-
-o, en la GUI, abrir `build/vivado/tp4.xpr` → *Generate Bitstream* → *Program Device*.
+Para programarla a mano: `vivado -mode batch -source verif/placa/program.tcl`, o en la GUI
+abrir `build/vivado/tp4.xpr` → *Generate Bitstream* → *Program Device*. Con
+`PLACA_PROGRAMAR=0 verif/run.sh placa` la capa no la programa y prueba lo que tenga cargado
+(si no es el bitstream del commit, falla el chequeo de versión).
 La configuración por JTAG es volátil: no toca la flash y se pierde al apagar la placa.
 
 El puerto serie es el segundo canal del chip USB de la placa: `/dev/ttyUSB1` por defecto

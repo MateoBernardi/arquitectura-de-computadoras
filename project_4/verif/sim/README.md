@@ -13,7 +13,7 @@ Corre el RTL real (`riscv_pipeline` y todos sus módulos, sin cambios) con
 ```
 
 `VARIANT=<nombre>` antes de `run_act.sh`, `run_traps.sh` o `run_elf.sh` usa el simulador
-de esa variante, por ejemplo `VARIANT=hazard_unit_nostall ./run_act.sh`.
+de esa variante, por ejemplo `VARIANT=hazard_unit_precise ./run_act.sh`.
 
 ## Cómo funciona
 
@@ -50,19 +50,27 @@ terminar con **la misma firma y la misma cantidad de instrucciones** que el dise
 Si no, se marca INCORRECTA. Se probó con una `forward_unit` sin forwarding desde MEM:
 queda marcada en todos los programas, aunque en varios "gana" ciclos.
 
-| Programa | Instrucciones | `base` ciclos (CPI) | `hazard_unit_nostall` | `hazard_unit_precise` |
-|---|---|---|---|---|
-| criba | 322 | 457 (1.419) | 453 (1.407) −0.9 % | 457 (1.419) +0.0 % |
-| criba_opt | 322 | 453 (1.407) | 453 (1.407) +0.0 % | 453 (1.407) +0.0 % |
-| criba_unroll | 277 | 378 (1.365) | 378 (1.365) +0.0 % | 378 (1.365) +0.0 % |
-| suma_arreglo | 518 | 837 (1.616) | 773 (1.492) −7.6 % | 837 (1.616) +0.0 % |
-| pipeline_test | 61 | 83 (1.361) | 82 (1.344) −1.2 % | 83 (1.361) +0.0 % |
-| test_bypass | 6 | 9 (1.500) | 9 (1.500) +0.0 % | 9 (1.500) +0.0 % |
-| ACT (39 tests) | 124 057 | 165 575 (1.335) | 153 382 (1.236) −7.4 % | 165 285 (1.332) −0.2 % |
+| Programa | Instrucciones | `base` ciclos (CPI) | `hazard_unit_precise` |
+|---|---|---|---|
+| criba | 322 | 457 (1.419) | 457 (1.419) +0.0 % |
+| criba_opt | 322 | 453 (1.407) | 453 (1.407) +0.0 % |
+| criba_unroll | 277 | 378 (1.365) | 378 (1.365) +0.0 % |
+| suma_arreglo | 518 | 837 (1.616) | 837 (1.616) +0.0 % |
+| pipeline_test | 61 | 83 (1.361) | 83 (1.361) +0.0 % |
+| test_bypass | 6 | 9 (1.500) | 9 (1.500) +0.0 % |
+| ACT (39 tests) | 124 057 | 165 575 (1.335) | 165 285 (1.332) −0.2 % |
 
-`bench/suma_arreglo.s` usa cada dato justo después de cargarlo: es el caso que la
-variante sin stall acelera. En las cribas, el load-use es raro (criba_opt y
-criba_unroll ya reordenaron el código para evitarlo).
+La evaluación que llevó al diseño actual (sin stall contra forwarding del load solo desde
+WB) está en [`../README.md`](../README.md#variantes-probar-ideas-sin-vivado).
+
+## Desglose del CPI (`perfil.py`)
+
+`perfil.py` corre los mismos programas con `+perfil` (`tb.sv`): cada instrucción retirada
+cuenta en su categoría (ALU, load, store, branch tomado o no, jal, jalr) y cada ciclo
+perdido se carga a la instrucción que lo causa, mirando las señales del pipeline en cada
+ciclo: 1 ciclo al load en un stall de load-use, 2 ciclos al branch tomado, jal o jalr que
+hace un redirect en EX. Lo que sobra es el llenado y vaciado del pipeline. El resultado va
+a `build/reports/perfil.md`.
 
 ## riscv-arch-test (ACT4)
 
