@@ -5,6 +5,11 @@ gui.py - GUI de la debug unit del RISC-V (tkinter + pyserial).
 Escribir assembly RV32I, "Ensamblar y cargar" (binutils RISC-V -> palabras -> trama 'L'),
 y controlar el CPU: Step / Run / Pause / Reset. Muestra etapas del pipeline, registros y dmem.
 
+"Medir": corre el programa del editor en la placa (con la dmem en cero, con 'R') y lee los
+contadores de rendimiento del hardware (ciclos e instrucciones retiradas, palabras 90 y 91
+del dump); corre el mismo programa en el modelo (el RTL simulado con Verilator,
+build/sim/placa/Vtb) y muestra los dos lado a lado en la solapa "Rendimiento".
+
 Tema oscuro (paleta Dracula):
   - botones redondeados dibujados a mano (Canvas), con icono y texto en negrita;
   - solapas de los Notebook con esquinas redondeadas (requiere Pillow; sin el son planas);
@@ -24,9 +29,13 @@ except Exception:                       # sin Pillow -> solapas planas
     _HAS_PIL = False
 
 from lib.assemble import AssemblerError, INSTALL_HINT, assemble_text, hex_listing
-from lib.debug_protocol import ABI, DEFAULT_BAUD, DebugLink, ProtocolError, decode_dump, disasm, format_stages, format_trap
+from lib import medir
+from lib.debug_protocol import (ABI, DEFAULT_BAUD, TRAP_CAUSES, DebugLink, ProtocolError, decode_dump, disasm,
+                                format_perf, format_stages, format_trap)
 
 IMEM_WORDS = 256                      # 2**IMEM_ADDR_W / 4 (top_riscv.v)
+SYS_FREQ_MHZ = 70                     # reloj del sistema en la placa (MMCM de top_riscv.v)
+MEASURE_TIMEOUT = 10.0                # s: un programa que no llega al halt se pausa
 SAMPLE = """# Suma 1..5 en x2 y la guarda en dmem[0]
         addi x1, x0, 1
         addi x2, x0, 0
@@ -72,6 +81,7 @@ PREFIXES = {
     "Pause":              "\u23f8",    # pausa
     "Reset CPU":          "\u21ba",    # reset
     "Actualizar":         "\u21bb",    # refresh
+    "Medir":              "\u23f1",    # cronometro
 }
 CONNECT_PREFIX = "\u23fb"              # encendido
 
@@ -400,6 +410,8 @@ class App:
         self.ser = None
         self.link = None
         self.running = False
+        self.measuring = None             # medicion en curso: {"words", "deadline", "name"}
+        self.n_measure = 0
         self.prev_regs = [0] * 32
         self._build()
         # tema oscuro: se aplica despues de crear los widgets (los re-estiliza)
@@ -430,7 +442,7 @@ class App:
         self.buttons = {}
         for name, cmd in (("Ensamblar y cargar", self.assemble_and_load), ("Step", self.step),
                           ("Run", self.run), ("Pause", self.pause), ("Reset CPU", self.reset),
-                          ("Actualizar", self.refresh)):
+                          ("Actualizar", self.refresh), ("Medir", self.measure)):
             b = RoundedButton(bar, text=name, command=cmd, state="disabled")
             b.pack(side="left", padx=2, pady=4)
             self.buttons[name] = b
@@ -463,10 +475,43 @@ class App:
         right.add(regs, text="Registros")
         self.dmemview = tk.Text(right, width=84, height=28, font=("monospace", 9), state="disabled")
         right.add(self.dmemview, text="Memoria de datos")
+        right.add(self._build_perf(right), text="Rendimiento")
+        self.right = right
         panes.add(right, weight=2)
 
         self.status = tk.StringVar(value="Desconectado")
         ttk.Label(self.root, textvariable=self.status, relief="sunken", anchor="w").pack(fill="x")
+
+    PERF_ROWS = (("cycles", "Ciclos"), ("instret", "Instrucciones"), ("cpi", "CPI"),
+                 ("time", f"Tiempo a {SYS_FREQ_MHZ} MHz"), ("cause", "Halt"))
+
+    def _build_perf(self, parent):
+        """Solapa Rendimiento: placa contra modelo, y el historial de mediciones."""
+        frame = ttk.Frame(parent, padding=6)
+        self.perf_title = tk.StringVar(value="Medir: corre el programa del editor en la placa y en el modelo")
+        ttk.Label(frame, textvariable=self.perf_title).pack(anchor="w")
+        self.perftree = ttk.Treeview(frame, columns=("what", "board", "model", "diff"), show="headings",
+                                     height=len(self.PERF_ROWS))
+        for c, text, w in (("what", "", 150), ("board", "Placa (contadores)", 170),
+                           ("model", "Modelo (simulación)", 170), ("diff", "Placa − modelo", 130)):
+            self.perftree.heading(c, text=text)
+            self.perftree.column(c, width=w, anchor="w" if c == "what" else "e")
+        for key, label in self.PERF_ROWS:
+            self.perftree.insert("", "end", iid=key, values=(label, "—", "—", ""))
+        self.perftree.pack(fill="x", pady=(6, 4))
+        self.perf_verdict = tk.StringVar(value="")
+        self.perf_verdict_lbl = ttk.Label(frame, textvariable=self.perf_verdict, justify="left")
+        self.perf_verdict_lbl.pack(anchor="w", pady=(0, 8))
+        ttk.Label(frame, text="Mediciones").pack(anchor="w")
+        self.histtree = ttk.Treeview(frame, columns=("n", "prog", "cyc", "inst", "cpi_b", "cpi_m", "ok"),
+                                     show="headings", height=8)
+        for c, text, w in (("n", "#", 30), ("prog", "Programa", 200), ("cyc", "Ciclos", 80),
+                           ("inst", "Instr.", 70), ("cpi_b", "CPI placa", 80), ("cpi_m", "CPI modelo", 80),
+                           ("ok", "", 70)):
+            self.histtree.heading(c, text=text)
+            self.histtree.column(c, width=w, anchor="w" if c == "prog" else "e")
+        self.histtree.pack(fill="both", expand=True)
+        return frame
 
     def _recolor(self):
         """Colorea los widgets que no son ttk (Text) y agrega los iconos."""
@@ -484,7 +529,7 @@ class App:
         self.btn_conn.configure(prefix=CONNECT_PREFIX)
 
         # jerarquia de color
-        for name in ("Ensamblar y cargar", "Run"):
+        for name in ("Ensamblar y cargar", "Run", "Medir"):
             if name in self.buttons:
                 self.buttons[name].configure(style="Accent.TButton")
         self.btn_conn.configure(style="Go.TButton")
@@ -528,6 +573,7 @@ class App:
 
     def disconnect(self):
         self.running = False
+        self.measuring = None
         if self.ser:
             self.ser.close()
         self.ser = self.link = None
@@ -540,6 +586,7 @@ class App:
             return fn()
         except (ProtocolError, AssemblerError, ValueError) as e:
             self.running = False
+            self.measuring = None
             self.status.set(f"Error: {e}")
             messagebox.showerror("Error", str(e))
         except Exception as e:                        # serie desconectado, etc.
@@ -550,6 +597,7 @@ class App:
     def assemble_and_load(self):
         def go():
             self.running = False
+            self.measuring = None
             result = assemble_text(self.editor.get("1.0", "end"), IMEM_WORDS)
             self._set_text(self.hexview, result.listing + "\n" + hex_listing(result.words))
             self.link.load(result.words)
@@ -563,6 +611,7 @@ class App:
     def step(self):
         def go():
             self.running = False
+            self.measuring = None
             if self.link.step():
                 self.status.set("Step")
                 self.refresh()
@@ -572,6 +621,7 @@ class App:
 
     def run(self):
         def go():
+            self.measuring = None
             if not self.link.run():
                 self.status.set("El CPU esta en halt (Reset CPU o recargar)")
                 return
@@ -594,6 +644,7 @@ class App:
 
     def pause(self):
         def go():
+            self.measuring = None
             halted = self.link.pause()
             self.running = False
             self.status.set("Pausado")
@@ -603,6 +654,7 @@ class App:
     def reset(self):
         def go():
             self.running = False
+            self.measuring = None
             self.link.reset()
             self.status.set("CPU reseteado (PC=0, registros en 0)")
             self.refresh()
@@ -610,9 +662,10 @@ class App:
 
     def refresh(self, halted=False):
         def go():
-            if self.running:
+            if self.running or self.measuring:
                 self.link.pause()
                 self.running = False
+                self.measuring = None
                 self.status.set("Pausado para leer el estado")
             d = decode_dump(self.link.dump())
             if halted:
@@ -621,7 +674,7 @@ class App:
         self._guard(go)
 
     def _show(self, d):
-        text = format_stages(d)
+        text = format_perf(d["perf"]) + "\n" + format_stages(d)
         text += "\n\nIF/ID: " + disasm(d["if_id"]["inst"], d["if_id"]["pc"])
         self._set_text(self.stages, text)
         for i, v in enumerate(d["regs"]):
@@ -631,6 +684,111 @@ class App:
         self.prev_regs = d["regs"]
         lines = [f"[{4 * i:04x}] 0x{v:08x}  {v - (1 << 32) if v >> 31 else v}" for i, v in enumerate(d["dmem"])]
         self._set_text(self.dmemview, "\n".join(lines))
+
+    # ------------------------------------------------------------ medicion
+    def measure(self):
+        """Corre el programa del editor en la placa con 'R' y espera el halt sin trabar la
+        ventana (_poll_measure); al llegar, compara los contadores con el modelo."""
+        def go():
+            self.running = False
+            self.measuring = None
+            result = assemble_text(self.editor.get("1.0", "end"), IMEM_WORDS)
+            self._set_text(self.hexview, result.listing + "\n" + hex_listing(result.words))
+            medir.prepare(self.link, result.words)       # dmem en cero, carga, reset
+            if not self.link.run():
+                raise ProtocolError("el CPU quedo en halt despues del reset")
+            self.measuring = {"words": result.words, "name": self._program_name(),
+                              "deadline": self._now() + MEASURE_TIMEOUT}
+            self.status.set("Midiendo en la placa…")
+            self.root.after(20, self._poll_measure)
+        self._guard(go)
+
+    @staticmethod
+    def _now():
+        import time
+        return time.monotonic()
+
+    def _program_name(self):
+        """Primer comentario o primera linea del editor (para el historial)."""
+        for line in self.editor.get("1.0", "end").splitlines():
+            line = line.strip()
+            if line:
+                return line.lstrip("#/ ").strip()[:40] or "programa"
+        return "programa"
+
+    def _poll_measure(self):
+        m = self.measuring
+        if m is None or not self.link:
+            return
+
+        def go():
+            if not self.link.poll_halt(0.0):
+                if self._now() > m["deadline"]:
+                    self.measuring = None
+                    self.link.pause()
+                    self.status.set(f"Medir: sin halt en {MEASURE_TIMEOUT:.0f} s (¿lazo infinito?); pausado")
+                    self.refresh()
+                else:
+                    self.root.after(50, self._poll_measure)
+                return
+            self.measuring = None
+            words = self.link.dump()
+            d = decode_dump(words)
+            self._show(d)
+            hw = medir.result(words)
+            sim = medir.find_sim()
+            ref = medir.simulate(sim, m["words"]) if sim else None
+            self._show_perf(m["name"], hw, ref, sim)
+            self.status.set(f"Medido: {hw['cycles']} ciclos, {hw['instret']} instrucciones — "
+                            + format_trap(d["trap"]))
+            self.right.select(len(self.right.tabs()) - 1)
+        self._guard(go)
+
+    def _show_perf(self, name, hw, ref, sim):
+        def cells(r):
+            if r is None:
+                return {k: "—" for k, _ in self.PERF_ROWS}
+            c = medir.cpi(r)
+            return {"cycles": str(r["cycles"]), "instret": str(r["instret"]),
+                    "cpi": f"{c:.3f}" if c else "—",
+                    "time": f"{r['cycles'] / SYS_FREQ_MHZ:.2f} µs",
+                    "cause": TRAP_CAUSES.get(r["cause"], f"causa {r['cause']}")}
+
+        b, m = cells(hw), cells(ref)
+        diff = {k: "" for k, _ in self.PERF_ROWS}
+        if ref is not None:
+            diff["cycles"] = f"{hw['cycles'] - ref['cycles']:+d}"
+            diff["instret"] = f"{hw['instret'] - ref['instret']:+d}"
+            cb, cm = medir.cpi(hw), medir.cpi(ref)
+            if cb and cm:
+                diff["cpi"] = f"{cb - cm:+.3f}"
+            diff["time"] = f"{(hw['cycles'] - ref['cycles']) / SYS_FREQ_MHZ:+.2f} µs"
+            diff["cause"] = "igual" if hw["cause"] == ref["cause"] else "distinta"
+        for key, label in self.PERF_ROWS:
+            self.perftree.item(key, values=(label, b[key], m[key], diff[key]))
+
+        self.n_measure += 1
+        self.perf_title.set(f"Medición {self.n_measure}: {name}")
+        if ref is None:
+            why = ("no está compilado (" + medir.BUILD_SIM_HINT + ")" if not sim
+                   else "no terminó en la simulación")
+            verdict, ok, color = f"Modelo: {why}. Solo se muestra la placa.", "—", MUTED
+        else:
+            diffs = medir.differences(hw, ref)
+            if diffs:
+                verdict = "Placa ≠ modelo:\n  " + "\n  ".join(diffs[:6])
+                if len(diffs) > 6:
+                    verdict += f"\n  … y {len(diffs) - 6} diferencias más"
+                ok, color = "distinto", PINK
+            else:
+                verdict = ("Placa = modelo: mismos ciclos, instrucciones, causa del halt, "
+                           "registros y dmem.")
+                ok, color = "igual", GREEN
+        self.perf_verdict.set(verdict)
+        self.perf_verdict_lbl.configure(foreground=color)
+        cb, cm = medir.cpi(hw), medir.cpi(ref)
+        self.histtree.insert("", 0, values=(self.n_measure, name, hw["cycles"], hw["instret"],
+                                            f"{cb:.3f}" if cb else "—", f"{cm:.3f}" if cm else "—", ok))
 
     # ------------------------------------------------------------ archivos
     def open_file(self):

@@ -46,7 +46,7 @@ def make_dump(pc=0x8):
 class FakeFPGA:
     """Puerto serie falso: responde como la debug unit de la FPGA."""
 
-    def __init__(self, dump=None, halt_on_step=False):
+    def __init__(self, dump=None, halt_on_step=False, halt_on_run=False):
         self.rx = b""
         self.timeout = 1
         self.baudrate = 19200
@@ -54,6 +54,7 @@ class FakeFPGA:
         self.loaded = []
         self.dump_words = dump if dump is not None else make_dump()
         self.halt_on_step = halt_on_step
+        self.halt_on_run = halt_on_run           # 'R' -> 'K' y enseguida el aviso 'H'
         self.closed = False
 
     def reset_input_buffer(self):
@@ -71,6 +72,8 @@ class FakeFPGA:
             self.rx += dp.RSP_OK
         elif cmd in (dp.CMD_STEP, dp.CMD_RUN):
             self.rx += dp.RSP_HALT if (self.halt_on_step and cmd == dp.CMD_STEP) else dp.RSP_OK
+            if self.halt_on_run and cmd == dp.CMD_RUN:
+                self.rx += dp.RSP_HALT
         elif cmd in (dp.CMD_PAUSE, dp.CMD_RESET):
             self.rx += dp.RSP_OK
         elif cmd == dp.CMD_DUMP:
@@ -139,7 +142,7 @@ class GuiTests(unittest.TestCase):
 
     def test_botones_son_redondeados(self):
         g, app = self.gui, self.app
-        self.assertEqual(sorted(app.buttons), ["Actualizar", "Ensamblar y cargar", "Pause",
+        self.assertEqual(sorted(app.buttons), ["Actualizar", "Ensamblar y cargar", "Medir", "Pause",
                                                "Reset CPU", "Run", "Step"])
         for nombre, b in app.buttons.items():
             self.assertIsInstance(b, g.RoundedButton, nombre)
@@ -237,6 +240,66 @@ class GuiTests(unittest.TestCase):
 
             self.assertEqual(app.regtree.item("3", "values")[2], "0x00000003")
             self.assertIn("0000", app.dmemview.get("1.0", "end"))
+        finally:
+            app.disconnect()
+            sys.modules.pop("serial", None)
+
+    def _medir(self, ref):
+        """Medir con una placa falsa que llega al halt con 83 ciclos y 61 instrucciones."""
+        gui, app = self.gui, self.app
+        _MessageBox.errors = []
+        gui.messagebox = _MessageBox
+        from lib.assemble import Assembled
+        gui.assemble_text = lambda src, max_words=None: Assembled(PROG, LISTING)
+        gui.medir.assemble_text = gui.assemble_text
+        gui.medir._clear_words = None
+        gui.medir.find_sim = lambda: "/fake/Vtb"
+        gui.medir.simulate = lambda sim, words, max_cycles=None: ref
+        w = make_dump() + [3, 0x8, 0] + [0x12345678] + [83, 61]   # trap (ebreak en pc 8), build, perf
+        self.assertEqual(len(w), dp.DBG_PERF + 2)
+        fpga = FakeFPGA(dump=w, halt_on_run=True)
+        _conectar(app, gui, fpga)
+        app.measure()
+        self.assertIsNotNone(app.measuring)
+        app._poll_measure()
+        self.assertIsNone(app.measuring)
+        self.assertEqual(_MessageBox.errors, [])
+        # la dmem se borra antes (primer programa cargado) y despues va el programa
+        self.assertEqual(fpga.loaded[-1], PROG)
+        self.assertEqual(len(fpga.loaded), 2)
+        return w
+
+    def test_medir_igual_al_modelo(self):
+        app = self.app
+        try:
+            w = self._medir(None)
+            d = dp.decode_dump(w)
+            ref = {"cycles": 83, "instret": 61, "cause": 3, "pc": 8, "tval": 0,
+                   "regs": d["regs"], "dmem": d["dmem"]}
+            self._medir(ref)
+            vals = {k: app.perftree.item(k, "values") for k in ("cycles", "instret", "cpi")}
+            self.assertEqual(list(vals["cycles"][1:]), ["83", "83", "+0"])
+            self.assertEqual(list(vals["instret"][1:]), ["61", "61", "+0"])
+            self.assertEqual(vals["cpi"][1], "1.361")
+            self.assertIn("Placa = modelo", app.perf_verdict.get())
+            first = app.histtree.get_children()[0]
+            self.assertEqual(app.histtree.item(first, "values")[-1], "igual")
+            self.assertIn("83 ciclos", app.stages.get("1.0", "end"))
+        finally:
+            app.disconnect()
+            sys.modules.pop("serial", None)
+
+    def test_medir_distinto_del_modelo(self):
+        app = self.app
+        try:
+            w = self._medir(None)
+            self.assertIn("Solo se muestra la placa", app.perf_verdict.get())
+            d = dp.decode_dump(w)
+            ref = {"cycles": 80, "instret": 61, "cause": 3, "pc": 8, "tval": 0,
+                   "regs": d["regs"], "dmem": d["dmem"]}
+            self._medir(ref)
+            self.assertEqual(app.perftree.item("cycles", "values")[3], "+3")
+            self.assertIn("ciclos: placa 83, modelo 80", app.perf_verdict.get())
         finally:
             app.disconnect()
             sys.modules.pop("serial", None)

@@ -17,6 +17,10 @@
 //               ECALL/EBREAK; level, until reset).
 //  - o_wb_*   : the register write of this cycle (we = 1 when the instruction in
 //               WB writes some x1..x31): for the display.
+//  - o_retire : a real instruction (not a bubble) is in WB and retires in this
+//               cycle if the CPU advances (i_enable). The one that stops execution
+//               is not counted (o_halt marks it). top_riscv counts it for the
+//               instructions counter; the simulation checks it against RVFI.
 //  - o_halt   : level, 1 when an instruction that stops execution reaches WB:
 //               ECALL, EBREAK or a fatal trap. Everything older has retired,
 //               the instruction itself wrote nothing, and nothing younger was
@@ -79,7 +83,8 @@ module riscv_pipeline #(
     output wire [4:0]             o_eventos,
     output wire                   o_wb_we,
     output wire [4:0]             o_wb_rd,
-    output wire [31:0]            o_wb_data
+    output wire [31:0]            o_wb_data,
+    output wire                   o_retire
 );
     localparam [15:0] DBG_REGS       = 16'd22;
     localparam [15:0] DBG_DMEM       = DBG_REGS + 16'd32;
@@ -383,6 +388,22 @@ module riscv_pipeline #(
     assign o_wb_we   = wb_reg_write & (wb_rd != 5'd0);
     assign o_wb_rd   = wb_rd;
     assign o_wb_data = wb_result;
+
+    // retirement: one valid bit per stage, 1 = a real instruction (0 = the bubble left
+    // by reset, a load-use stall or a flush). Same rules as the RVFI copies below.
+    reg id_valid, ex_valid, mem_valid, wb_valid;
+    always @(posedge clk) begin
+        if (rst) begin
+            id_valid <= 1'b0; ex_valid <= 1'b0; mem_valid <= 1'b0; wb_valid <= 1'b0;
+        end else if (en) begin
+            if (flush_if_id) id_valid <= 1'b0;
+            else if (!stall) id_valid <= 1'b1;
+            ex_valid  <= flush_id_ex ? 1'b0 : id_valid;
+            mem_valid <= ex_valid;
+            wb_valid  <= mem_valid;
+        end
+    end
+    assign o_retire = wb_valid & ~wb_halt;
 
     // ---------------------------------------------------------------- debug
     wire [31:0] dbg_idex_ctrl  = {17'd0, ex_alu_op, ex_wb_sel, ex_alu_src, ex_halt, ex_is_auipc,

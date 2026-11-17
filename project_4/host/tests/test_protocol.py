@@ -93,6 +93,16 @@ class ProtocolTests(unittest.TestCase):
         self.assertIsNone(dp.decode_dump(w[:dp.DBG_BUILD])["build"])
         self.assertIn("sin version", dp.format_build(0))
 
+    def test_decode_perf(self):
+        w = [0] * (dp.DBG_PERF + 2)
+        w[dp.DBG_PERF:] = [83, 61]
+        d = dp.decode_dump(w)
+        self.assertEqual(d["perf"], {"cycles": 83, "instret": 61})
+        self.assertEqual(dp.format_perf(d["perf"]), "Contadores: 83 ciclos, 61 instrucciones, CPI 1.361")
+        self.assertIn("CPI 1.361", dp.format_dump(w))
+        self.assertIsNone(dp.decode_dump(w[:dp.DBG_PERF])["perf"])
+        self.assertIn("CPI -", dp.format_perf({"cycles": 0, "instret": 0}))
+
     def test_disasm_roundtrip(self):
         src = open(os.path.join(PROJ, "programs", "pipeline_test.s")).read()
         words, lines = model.assemble(src)

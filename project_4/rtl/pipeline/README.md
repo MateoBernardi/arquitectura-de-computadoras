@@ -15,7 +15,7 @@ i_imem_we     1 ──▶│     [secuencial]     │──▶ o_eventos    5  C
 i_imem_waddr 10 ──▶│                      │──▶ o_wb_we      1  C
 i_imem_wdata  8 ──▶│                      │──▶ o_wb_rd      5  R
 i_dbg_addr   16 ──▶│                      │──▶ o_wb_data   32  R
-                   │                      │
+                   │                      │──▶ o_retire     1  R
                    └──────────────────────┘
 ```
 
@@ -28,6 +28,7 @@ i_dbg_addr   16 ──▶│                      │──▶ o_wb_data   32  R
 | `i_dbg_addr` / `o_dbg_data` | el bus de debug: una dirección elige una palabra del estado interno (ver abajo); `o_dbg_count` es la cantidad de palabras (constante, 89) |
 | `o_eventos` | lo que hace el pipeline en este ciclo, para los LEDs de la placa: `[0]` forwarding al operando A, `[1]` al B (solo si la instrucción en EX usa ese operando: en los formatos I, U y J esos bits son parte del inmediato), `[2]` stall de load-use, `[3]` flush por un salto tomado, `[4]` detenido por una excepción (un trap que no es `ecall` ni `ebreak`; nivel, hasta el reset) |
 | `o_wb_*` | la escritura en el banco de registros de este ciclo: `o_wb_we` = 1 si la instrucción en WB escribe algún x1..x31, en `o_wb_rd`, el valor `o_wb_data`. Para el display |
+| `o_retire` | hay una instrucción real (no una burbuja de reset, stall o flush) en WB: se retira en este ciclo si el CPU avanza. La que detiene el CPU no cuenta (la marca `o_halt`). Lo usa el contador de instrucciones de `top_riscv`; la simulación lo compara con RVFI en cada ciclo |
 
 | Parámetro | En el sistema | Para qué |
 |---|---|---|
@@ -119,6 +120,7 @@ Si se agrega una palabra, va siempre al final.
 | 54 a 85 | las primeras 32 palabras de la dmem |
 | 86 a 88 | el trap: causa, PC de la instrucción, dirección que falló (válidos con `o_halt = 1`) |
 | 89 | `BUILD_ID`, la versión del RTL: la agrega `top_riscv`, no el CPU |
+| 90, 91 | contadores de rendimiento: ciclos e instrucciones retiradas (también de `top_riscv`, ver [`../top/README.md`](../top/README.md)) |
 
 ## Reset, enable y halt
 

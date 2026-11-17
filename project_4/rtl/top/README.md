@@ -127,12 +127,28 @@ enganchó (`locked`), el sistema queda en reset.
 
 ## La palabra de versión
 
-La debug unit lee del CPU un mapa de 89 palabras; `top_riscv` le agrega una al final (la
-89): `BUILD_ID`, la versión del hardware con que se sintetizó: el último commit que cambió
+La debug unit lee del CPU un mapa de 89 palabras; `top_riscv` le agrega tres al final: la
+89 es `BUILD_ID` y la 90 y la 91, los contadores de rendimiento (ver abajo). `BUILD_ID` es, la versión del hardware con que se sintetizó: el último commit que cambió
 `rtl/`, `constraints/` o los tcl de síntesis e implementación (0 si tienen cambios sin
 commitear). `verif/run.sh` lo calcula y `verif/fpga/synth.tcl` lo pasa como parámetro; el
 host lo muestra, y la verificación en la placa lo usa para comprobar que el bitstream
 cargado es el del hardware que se está probando.
+
+## Los contadores de rendimiento
+
+Después de `BUILD_ID` van dos palabras más (la 90 y la 91): **los ciclos** que avanzó el CPU
+y **las instrucciones que retiró** desde el último reset del CPU (carga `L` o `X`). El host
+calcula el CPI = ciclos / instrucciones (la GUI lo muestra con el botón *Medir*, al lado
+del de la simulación).
+
+- Ciclos: cuentan cuando `cpu_enable` = 1, o sea solo cuando el CPU avanza. Un `S` suma
+  uno; con `R` cuentan a la velocidad del reloj hasta el halt; un dump o el CPU detenido no
+  suman. Por eso dan lo mismo corriendo de a un ciclo que con `R` (la capa `placa` lo
+  comprueba).
+- Instrucciones: cuentan cuando además `o_retire` = 1 (una instrucción real, no una
+  burbuja, en WB). La que detuvo el CPU se suma al leer (`+ o_halt`), igual que en la
+  simulación (`verif/sim/tb.sv`), que además compara `o_retire` con RVFI en cada ciclo.
+- Son de 32 bits: a 70 MHz dan la vuelta después de ~61 s de `R`.
 
 ## Puertos asíncronos
 

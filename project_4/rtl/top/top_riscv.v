@@ -18,8 +18,11 @@
 //   de salida va en pasos de 0.125, por eso se pasa multiplicado por 8). Por defecto,
 //   100 MHz * 7 / 10 = 70 MHz. El baud rate se calcula con SYS_FREQ. USE_MMCM=0 usa
 //   i_clk directo (simulacion RTL).
-// - Version: la ultima palabra del dump (la 89) es BUILD_ID. La sintesis le pasa el
-//   commit del RTL, asi el host sabe que bitstream esta cargado en la placa.
+// - Version: la palabra 89 del dump es BUILD_ID. La sintesis le pasa el commit del
+//   RTL, asi el host sabe que bitstream esta cargado en la placa.
+// - Rendimiento: las palabras 90 y 91 del dump son los ciclos que avanzo el CPU y las
+//   instrucciones que retiro (incluida la que lo detuvo) desde el ultimo reset del CPU
+//   (carga 'L' o 'X'). CPI = 90 / 91. 32 bits: a 70 MHz dan la vuelta en ~61 s de 'R'.
 // -----------------------------------------------------------------------------
 module top_riscv #(
     parameter CLK_FREQ    = 100_000_000,     // frecuencia de i_clk
@@ -144,6 +147,7 @@ module top_riscv #(
     wire        cpu_wb_we;
     wire [4:0]  cpu_wb_rd;
     wire [31:0] cpu_wb_data;
+    wire        cpu_retire;
 
     riscv_pipeline #(
         .IMEM_ADDR_W(IMEM_ADDR_W)
@@ -161,12 +165,33 @@ module top_riscv #(
         .o_eventos   (cpu_eventos),
         .o_wb_we     (cpu_wb_we),
         .o_wb_rd     (cpu_wb_rd),
-        .o_wb_data   (cpu_wb_data)
+        .o_wb_data   (cpu_wb_data),
+        .o_retire    (cpu_retire)
     );
 
-    // Bus de debug: las palabras del CPU y, al final, BUILD_ID
-    assign dbg_count = cpu_dbg_count + 16'd1;
-    assign dbg_data  = (dbg_addr == cpu_dbg_count) ? BUILD_ID : cpu_dbg_data;
+    // --- contadores de rendimiento ---------------------------------------------------
+    // Cuentan solo los ciclos en que el CPU avanza (cpu_enable: un 'S' = un ciclo; con
+    // 'R' hasta el halt; nunca durante un dump ni con el CPU detenido), asi miden lo
+    // mismo con step que con run. Se ponen en cero con el reset del CPU.
+    reg [31:0] perf_ciclos, perf_instret;
+    always @(posedge clk) begin
+        if (sys_reset || cpu_reset) begin
+            perf_ciclos  <= 32'd0;
+            perf_instret <= 32'd0;
+        end else if (cpu_enable) begin
+            perf_ciclos  <= perf_ciclos + 32'd1;
+            if (cpu_retire) perf_instret <= perf_instret + 32'd1;
+        end
+    end
+    // la instruccion que detuvo el CPU (ebreak, ecall o trap) llega a WB y cuenta como
+    // retirada, igual que en la simulacion (verif/sim/tb.sv)
+    wire [31:0] perf_instret_dump = perf_instret + {31'd0, cpu_halt};
+
+    // Bus de debug: las palabras del CPU y, al final, BUILD_ID y los contadores
+    assign dbg_count = cpu_dbg_count + 16'd3;
+    assign dbg_data  = (dbg_addr == cpu_dbg_count)         ? BUILD_ID          :
+                       (dbg_addr == cpu_dbg_count + 16'd1) ? perf_ciclos       :
+                       (dbg_addr == cpu_dbg_count + 16'd2) ? perf_instret_dump : cpu_dbg_data;
 
     // --- LEDs y display -------------------------------------------------------------
     // eventos del pipeline: forwarding A/B, stall y flush duran un ciclo, así que se

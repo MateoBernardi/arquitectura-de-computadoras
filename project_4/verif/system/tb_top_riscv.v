@@ -25,7 +25,14 @@ module tb_top_riscv;
     localparam integer DBG_DMEM_AT  = 54;
     localparam integer DBG_TRAP_AT  = 86;
     localparam integer DBG_BUILD_AT = 89;
-    localparam integer DBG_NWORDS   = 90;
+    localparam integer DBG_CYC_AT   = 90;              // contadores de rendimiento (top_riscv)
+    localparam integer DBG_INST_AT  = 91;
+    localparam integer DBG_NWORDS   = 92;
+    // ciclos e instrucciones de pipeline_prog.hex hasta el halt, según la simulación del
+    // RTL con Verilator (build/sim/placa/Vtb +hex=pipeline_prog.hex): instrucciones sale
+    // de RVFI, que verif/sim/tb.sv compara ciclo a ciclo con o_retire
+    localparam integer PROG_CYCLES  = 83;
+    localparam integer PROG_INSTRET = 61;
     localparam [31:0]  BUILD_ID     = 32'hC0DE_0089;   // valor de prueba: llega intacto al dump
 
     reg        clk = 1'b0;
@@ -338,12 +345,15 @@ module tb_top_riscv;
         load_program(prog_len, "K");
         check_imem;
         dump_expect_pc(32'h0);
+        expect_val("contadores en cero despues de la carga", dw[DBG_CYC_AT] | dw[DBG_INST_AT], 0);
 
         $display("-- Step");
         step_n(1);
         dump_expect_pc(32'h4);
         step_n(2);
         dump_expect_pc(32'hC);
+        expect_val("ciclos: uno por step (3)", dw[DBG_CYC_AT], 3);
+        expect_val("instrucciones: ninguna llego a WB en 3 ciclos", dw[DBG_INST_AT], 0);
 
         $display("-- Run hasta el halt (ebreak)");
         uart_send("R");
@@ -352,6 +362,8 @@ module tb_top_riscv;
         expect_led(2, 1'b1);
         expect_led(0, 1'b0);
         check_state;
+        expect_val("ciclos hasta el halt (step + run) = simulacion", dw[DBG_CYC_AT], PROG_CYCLES);
+        expect_val("instrucciones hasta el halt = simulacion", dw[DBG_INST_AT], PROG_INSTRET);
         expect_trap(32'd3, ebreak_pc(prog_len));               // causa 3 = ebreak
         expect_led(15, 1'b1);                          // halt (LD15)
         expect_led(14, 1'b0);                          // ebreak no es una excepción de error
@@ -367,16 +379,21 @@ module tb_top_riscv;
         sw_display = 1'b1;
         uart_send("S");
         expect_reply("H");                             // sigue en halt
+        dump;
+        expect_val("ciclos: no avanzan con el CPU en halt", dw[DBG_CYC_AT], PROG_CYCLES);
 
         $display("-- Reset del CPU: registros limpios, programa conservado");
         uart_send("X");
         expect_reply("K");
         dump_expect_pc(32'h0);
+        expect_val("contadores en cero despues del reset", dw[DBG_CYC_AT] | dw[DBG_INST_AT], 0);
         check_imem;
         uart_send("R");
         expect_reply("K");
         expect_reply("H");
         check_state;
+        expect_val("ciclos solo con run = simulacion", dw[DBG_CYC_AT], PROG_CYCLES);
+        expect_val("instrucciones solo con run = simulacion", dw[DBG_INST_AT], PROG_INSTRET);
 
         $display("-- Pause en ejecucion continua (lazo infinito)");
         prog[0] = 32'h0000006f;                        // jal x0,0

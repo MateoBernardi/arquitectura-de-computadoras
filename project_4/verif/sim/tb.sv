@@ -37,13 +37,13 @@ module tb #(
     reg rst = 1;
     always #5 clk = ~clk;
 
-    wire halt;
+    wire halt, retire;
     `RVFI_WIRES
     riscv_pipeline #(.IMEM_ADDR_W(IMEM_ADDR_W), .DMEM_DEPTH(DMEM_DEPTH)) dut (
         `RVFI_CONN,
         .clk(clk), .i_rst(rst), .i_enable(!rst), .o_halt(halt),
         .i_imem_we(1'b0), .i_imem_waddr({IMEM_ADDR_W{1'b0}}), .i_imem_wdata(8'd0),
-        .i_dbg_addr(16'd0), .o_dbg_data(), .o_dbg_count()
+        .i_dbg_addr(16'd0), .o_dbg_data(), .o_dbg_count(), .o_retire(retire)
     );
 
     // ------------------------------------------------------------- carga
@@ -86,6 +86,10 @@ module tb #(
     longint cycles = 0;
     longint instret = 0;
     always @(posedge clk) if (rvfi_valid) instret <= instret + 1;
+    // o_retire: lo que cuenta el contador de instrucciones de la placa (top_riscv). Tiene que
+    // coincidir con RVFI en cada ciclo, así el CPI que mide la placa es el mismo de acá.
+    always @(posedge clk) if (!rst && !halt && retire !== rvfi_valid)
+        $fatal(1, "tb: FAIL, o_retire=%0d y rvfi_valid=%0d en el ciclo %0d", retire, rvfi_valid, cycles);
 
     // ------------------------------------------------------------- perfil
     // Cada instrucción retirada cuenta en su categoría (por el opcode de rvfi_insn). Los

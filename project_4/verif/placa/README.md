@@ -35,13 +35,15 @@ tiene que terminar en el hardware igual que en la simulación.
 
 | Grupo | Qué compara |
 |---|---|
-| versión | `BUILD_ID` (última palabra del dump) es la versión actual del hardware; si el hardware tiene cambios sin commitear, falla: no hay con qué comparar |
-| programas (`programs/*.s`) | ciclos, x1..x31, las 32 palabras de la dmem que muestra el dump, y causa, PC y dirección del halt |
+| versión | `BUILD_ID` (palabra 89 del dump) es la versión actual del hardware; si el hardware tiene cambios sin commitear, falla: no hay con qué comparar |
+| programas (`programs/*.s`) | ciclos, instrucciones retiradas, x1..x31, las 32 palabras de la dmem que muestra el dump, y causa, PC y dirección del halt |
 | traps (`verif/sim/tests/traps/*.S`) | lo mismo, para cada causa de trap |
 | comandos de la debug unit | step, run, reset (borra registros, conserva el programa), pausa, trap por instrucción ilegal, programa demasiado grande (`E`), comando desconocido (`?`): los escenarios de `verif/system/`, ahora en hardware |
 
-Los ciclos se cuentan con `S` (un ciclo por comando), igual que en la placa los cuenta el
-host. La placa conserva la dmem entre programas y el reset del CPU no la borra, así que antes
+Los programas corren con `R` y los ciclos y las instrucciones los cuentan los contadores de
+rendimiento de `top_riscv` (palabras 90 y 91 del dump). En los comandos se comprueba además
+que los contadores dan lo mismo con `R` que contando los `S` de a uno hasta el halt. La
+comparación está en `host/lib/medir.py`, la misma que usa el botón *Medir* de la GUI. La placa conserva la dmem entre programas y el reset del CPU no la borra, así que antes
 de cada programa se corre uno que la pone en cero; la simulación arranca con la dmem en cero
 (`+dmem-en-cero`).
 

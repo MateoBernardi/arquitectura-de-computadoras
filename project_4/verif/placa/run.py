@@ -6,7 +6,8 @@ Uso: run.py --puerto /dev/ttyUSB1 --build-id <8 hex> --sim <Vtb de la placa>
 No compara contra valores escritos a mano sino contra la simulación del RTL con las
 memorias de la placa (verif/sim, `build.sh placa`): cada programa tiene que terminar en
 la placa con los mismos registros, la misma dmem, la misma causa de halt y la misma
-cantidad de ciclos que en la simulación.
+cantidad de ciclos e instrucciones retiradas que en la simulación (los cuentan los
+contadores de rendimiento de top_riscv, palabras 90 y 91 del dump).
 
   1. versión: la palabra BUILD_ID del dump es la versión del hardware que se está probando
      (el último commit que cambió rtl/, constraints/ o los tcl de verif/fpga/)
@@ -19,7 +20,6 @@ Escribe un renglón [ok ] / [MAL] por chequeo.
 import argparse
 import glob
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -27,21 +27,12 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJ = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(PROJ, "host"))
-from lib.assemble import assemble_file, assemble_text  # noqa: E402
+from lib.assemble import assemble_file  # noqa: E402
+from lib import medir  # noqa: E402
 from lib.debug_protocol import DebugLink, ProtocolError, decode_dump  # noqa: E402
 
 IMEM_WORDS = 256
 MAX_CYCLES = 20000
-# Pone la dmem (1 KB) en cero: la placa conserva la dmem entre programas y el reset del
-# CPU no la borra; la simulación arranca con la dmem en cero (+dmem-en-cero).
-CLEAR_DMEM = """
-        addi x1, x0, 0
-        addi x2, x0, 1024
-loop:   sw   x0, 0(x1)
-        addi x1, x1, 4
-        bne  x1, x2, loop
-        ebreak
-"""
 
 results = []
 
@@ -51,74 +42,27 @@ def check(ok, text):
     print(f"[{'ok ' if ok else 'MAL'}] {text}", flush=True)
 
 
-# ------------------------------------------------------------------ simulación de referencia
-def simulate(sim, words):
-    """Corre el programa en la simulación del RTL (memorias de la placa)."""
-    with tempfile.NamedTemporaryFile("w", suffix=".hex", delete=False) as f:
-        f.write("".join(f"{w:08x}\n" for w in words))
-        hexf = f.name
-    try:
-        r = subprocess.run([sim, f"+hex={hexf}", "+estado", "+dmem-en-cero", f"+max-cycles={MAX_CYCLES}"],
-                           capture_output=True, text=True, timeout=60)
-    finally:
-        os.unlink(hexf)
-    out = r.stdout
-    m = re.search(r"ciclos=(\d+).*causa=(\d+)\s+pc=([0-9a-f]+)\s+tval=([0-9a-f]+)", out)
-    if not m:
-        return None
-    return {"cycles": int(m[1]), "cause": int(m[2]), "pc": int(m[3], 16), "tval": int(m[4], 16),
-            "regs": [0] + [int(v, 16) for v in re.findall(r"tb: x\d+ = ([0-9a-f]+)", out)],
-            "dmem": [int(v, 16) for v in re.findall(r"tb: dmem \d+ = ([0-9a-f]+)", out)]}
-
-
-# ------------------------------------------------------------------ placa
-def run_on_board(link, words):
-    """Pone la dmem en cero, carga el programa y lo ejecuta ciclo a ciclo hasta el halt."""
-    link.load(assemble_text(CLEAR_DMEM).words)
-    link.reset()
-    if not (link.run() and link.poll_halt(2.0)):        # no hace falta contar sus ciclos
-        raise ProtocolError("el programa que borra la dmem no terminó")
-    link.load(words)
-    link.reset()
-    cycles = 0
-    while link.step():
-        cycles += 1
-        if cycles > MAX_CYCLES:
-            return None
-    d = decode_dump(link.dump())
-    return {"cycles": cycles, "cause": d["trap"]["cause"], "pc": d["trap"]["pc"],
-            "tval": d["trap"]["tval"], "regs": d["regs"], "dmem": d["dmem"]}
-
-
 def compare(name, link, sim, words):
+    """El programa en la placa (con 'R', medido por los contadores de top_riscv) contra la
+    simulación: mismos ciclos, instrucciones, causa del halt, registros y dmem."""
     if len(words) > IMEM_WORDS:
         check(False, f"{name}: {len(words)} palabras, no entra en la imem de la placa")
         return
-    ref = simulate(sim, words)
+    ref = medir.simulate(sim, words, MAX_CYCLES)
     if ref is None:
         check(False, f"{name}: la simulación de referencia no terminó")
         return
     try:
-        hw = run_on_board(link, words)
+        hw = medir.board(link, words, timeout=5.0)
     except ProtocolError as e:
         check(False, f"{name}: {e}")
         return
     if hw is None:
-        check(False, f"{name}: sin halt en la placa después de {MAX_CYCLES} ciclos")
+        check(False, f"{name}: sin halt en la placa")
         return
-    diffs = []
-    if hw["cycles"] != ref["cycles"]:
-        diffs.append(f"ciclos: placa {hw['cycles']}, simulación {ref['cycles']}")
-    for k, label in (("cause", "causa"), ("pc", "pc del trap"), ("tval", "dirección del trap")):
-        if hw[k] != ref[k]:
-            diffs.append(f"{label}: placa {hw[k]:#x}, simulación {ref[k]:#x}")
-    for i in range(1, 32):
-        if hw["regs"][i] != ref["regs"][i]:
-            diffs.append(f"x{i}: placa {hw['regs'][i]:#010x}, simulación {ref['regs'][i]:#010x}")
-    for i, (a, b) in enumerate(zip(hw["dmem"], ref["dmem"])):
-        if a != b:
-            diffs.append(f"dmem[{i}]: placa {a:#010x}, simulación {b:#010x}")
-    check(not diffs, f"{name}: {hw['cycles']} ciclos, causa {hw['cause']} en pc={hw['pc']:#x}"
+    diffs = medir.differences(hw, ref)
+    check(not diffs, f"{name}: {hw['cycles']} ciclos, {hw['instret']} instrucciones, "
+          f"causa {hw['cause']} en pc={hw['pc']:#x}"
           + ("" if not diffs else " — distinto de la simulación:\n        " + "\n        ".join(diffs[:8])))
 
 
@@ -153,6 +97,17 @@ def commands(link, ser):
     ok = d["regs"] == exp[:32] and d["dmem"][:16] == exp[32:48]
     check(ok, "run: registros y dmem iguales al modelo de referencia (pipeline_exp.hex)")
     check(d["trap"]["cause"] == 3, f"run: se detuvo por ebreak (causa {d['trap']['cause']})")
+
+    run_perf = d["perf"]
+    link.reset()
+    steps = 0
+    while link.step() and steps <= MAX_CYCLES:
+        steps += 1
+    step_perf = decode_dump(link.dump())["perf"]
+    check(step_perf is not None and step_perf["cycles"] == steps == run_perf["cycles"]
+          and step_perf["instret"] == run_perf["instret"],
+          f"contadores: {steps} steps = {step_perf and step_perf['cycles']} ciclos contados "
+          f"(con run: {run_perf and run_perf['cycles']}), instrucciones iguales con step y con run")
 
     link.reset()
     d = decode_dump(link.dump())

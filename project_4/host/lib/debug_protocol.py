@@ -9,8 +9,9 @@ Protocolo (ver rtl/debug/debug_unit.v):
     'H' espontaneo cuando el CPU llega a halt durante 'R'.
 
 Mapa del dump: palabras 0..88 en el encabezado de riscv_pipeline.v; la 89 es BUILD_ID
-(top_riscv.v), la version del RTL cargado. Si se agregan palabras, se agregan siempre al
-final y se extiende decode_dump().
+(top_riscv.v), la version del RTL cargado; la 90 y la 91 son los contadores de rendimiento
+(top_riscv.v): ciclos que avanzo el CPU e instrucciones retiradas desde el ultimo reset
+del CPU. Si se agregan palabras, se agregan siempre al final y se extiende decode_dump().
 """
 
 CMD_LOAD, CMD_STEP, CMD_RUN, CMD_PAUSE, CMD_RESET, CMD_DUMP = b"L", b"S", b"R", b"P", b"X", b"D"
@@ -21,6 +22,7 @@ DBG_DMEM = 54
 DBG_DMEM_WORDS = 32
 DBG_TRAP = DBG_DMEM + DBG_DMEM_WORDS   # causa, pc y valor del trap (3 palabras)
 DBG_BUILD = DBG_TRAP + 3               # version del RTL (commit), 0 = sin version
+DBG_PERF = DBG_BUILD + 1               # ciclos e instrucciones retiradas (2 palabras)
 DEFAULT_BAUD = 19200
 
 # Por qué se detuvo el CPU: códigos estándar de excepción (mcause). Ver riscv_pipeline.v.
@@ -207,6 +209,9 @@ def decode_dump(w):
                  if len(w) >= DBG_TRAP + 3 else None),
         # None si el bitstream es anterior a la palabra de version
         "build": w[DBG_BUILD] if len(w) > DBG_BUILD else None,
+        # None si el bitstream es anterior a los contadores
+        "perf": ({"cycles": w[DBG_PERF], "instret": w[DBG_PERF + 1]}
+                 if len(w) >= DBG_PERF + 2 else None),
     }
 
 
@@ -297,10 +302,18 @@ def format_build(b):
     return "RTL: sin version (sintetizado con cambios sin commitear)" if b == 0 else f"RTL: commit {b:08x}"
 
 
+def format_perf(p):
+    """Texto de los contadores de rendimiento (p = decode_dump(...)["perf"])."""
+    if p is None:
+        return "Contadores: no estan en este bitstream (anterior a los contadores)"
+    cpi = f"{p['cycles'] / p['instret']:.3f}" if p["instret"] else "-"
+    return f"Contadores: {p['cycles']} ciclos, {p['instret']} instrucciones, CPI {cpi}"
+
+
 def format_dump(words):
     """Texto legible del dump completo (para la CLI)."""
     d = decode_dump(words)
-    out = [format_build(d["build"]), format_stages(d)]
+    out = [format_build(d["build"]), format_perf(d["perf"]), format_stages(d)]
     if d["mem_wb"]["halt"]:
         out.append(format_trap(d["trap"]))
     out.append("Registros")
