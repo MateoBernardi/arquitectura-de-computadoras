@@ -5,7 +5,9 @@
 # Variables de entorno: TP4_PROJECT_DIR (carpeta del proyecto, por defecto build/vivado/).
 # Escribe TP4_OK / TP4_ERROR / TP4_BIT en el log para que run.sh arme los chequeos.
 set root [file normalize [file join [file dirname [info script]] .. ..]]
-proc env_or {name default} { expr {[info exists ::env($name)] ? $::env($name) : $default} }
+# Sin expr: expr convierte a número un valor que lo parece ("95006e25", un BUILD_ID, se
+# volvía 9.5006e+29); así se devuelve el texto tal cual.
+proc env_or {name default} { if {[info exists ::env($name)]} { return $::env($name) }; return $default }
 
 open_project [env_or TP4_PROJECT_DIR $root/build/vivado]/tp4.xpr
 set impl [get_runs impl_1]

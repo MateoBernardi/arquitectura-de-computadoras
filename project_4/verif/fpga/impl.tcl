@@ -4,7 +4,9 @@
 # Variables de entorno: TP4_PROJECT_DIR (carpeta del proyecto, por defecto build/vivado/),
 # TP4_REPORT_DIR (dónde escribir los reportes, por defecto build/reports/implementacion/).
 set root [file normalize [file join [file dirname [info script]] .. ..]]
-proc env_or {name default} { expr {[info exists ::env($name)] ? $::env($name) : $default} }
+# Sin expr: expr convierte a número un valor que lo parece ("95006e25", un BUILD_ID, se
+# volvía 9.5006e+29); así se devuelve el texto tal cual.
+proc env_or {name default} { if {[info exists ::env($name)]} { return $::env($name) }; return $default }
 set rep [env_or TP4_REPORT_DIR $root/build/reports/implementacion]
 file mkdir $rep
 

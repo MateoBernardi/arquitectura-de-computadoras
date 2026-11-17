@@ -9,6 +9,7 @@ No compara contra números esperados (LUTs, FFs): compara contra el RTL.
   - cada aviso de Vivado está justificado en waivers.txt; un aviso sin justificar falla,
     y una justificación que ya no corresponde a ningún aviso también
   - Vivado no eliminó lógica secuencial del RTL (aunque lo informe como INFO)
+  - el BUILD_ID del netlist es el que pidió run.sh (TP4_BUILD_ID)
   - cada arreglo del RTL se implementó como RAM (o está justificado como MEM en
     waivers.txt), y no aparece ninguna RAM que el RTL no declare
 Escribe un renglón [ok ] / [MAL] por chequeo.
@@ -86,6 +87,12 @@ def main():
 
     check(re.search(r"^synth_design completed successfully", log, re.M) is not None
           or "Synthesis finished with 0 errors" in log, "la síntesis terminó")
+    want = os.environ.get("TP4_BUILD_ID")
+    if want is not None:
+        m = re.search(r"Parameter BUILD_ID bound to: 32'b([01]{32})", log)
+        got = int(m[1], 2) if m else None
+        check(got == int(want, 16), f"BUILD_ID en el netlist: "
+              + (f"{got:08x}" if got is not None else "no aparece en el log") + f" (pedido {int(want, 16):08x})")
     for sev in ("ERROR", "CRITICAL WARNING"):
         bad = [f"[{i}] {short(t)}" for s, i, t in msgs if s == sev]
         check(not bad, f"{sev.lower()}s: {len(bad)}" + "".join(f"\n        {b}" for b in bad[:10]))
