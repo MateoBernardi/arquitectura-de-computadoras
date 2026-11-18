@@ -40,8 +40,7 @@ dbg_addr  8 ──▶│                                   │
 La dmem **conserva su contenido** entre un programa y el siguiente: ni la carga (`L`) ni
 el reset del CPU (`X`) la borran. Solo arranca en cero al configurar la FPGA.
 
-**Por qué:** es lo que hace un procesador real (el reset deja el CPU en un estado conocido,
-pero no la RAM), y borrarla requeriría un puerto de escritura más para la debug unit en un
+**Por qué:** borrarla requeriría un puerto de escritura más para la debug unit en un
 camino que ya es crítico para el timing.
 
 **Consecuencia:** un programa que depende del contenido inicial de la memoria lo tiene que

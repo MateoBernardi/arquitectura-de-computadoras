@@ -1,20 +1,15 @@
 # `uart/` — UART con colas
 
-El enlace serie con la PC: recibe y envía bytes en formato **8N1** (8 bits de datos, sin
-paridad, 1 bit de stop) por el chip USB-serie de la placa. Del otro lado está la debug
-unit, que habla con la UART de a bytes y nunca ve los bits.
+El enlace serie con la PC. Usa comunicación serie asíncrona con tramas 8N1: cada byte viaja como 1 bit de start, 8 bits de datos, sin paridad, y 1 bit de stop. Sobre este enlace va el protocolo de la debug unit.
 
 ```
-   PC ── USB ── FTDI ──▶ i_rx ──▶ sync_2ff ──▶ uart_rx ──▶ cola RX ──▶ debug_unit
+   PC ── USB ── SERIE ──▶ i_rx ──▶ sync_2ff ──▶ uart_rx ──▶ cola RX ──▶ debug_unit
                                                                         │
-   PC ◀─ USB ── FTDI ◀── o_tx ◀────────────── uart_tx ◀── cola TX ◀─────┘
+   PC ◀─ USB ── SERIE ◀── o_tx ◀────────────── uart_tx ◀── cola TX ◀─────┘
                          baud_rate_gen: un tick cada 1/16 de bit, para RX y TX
 ```
 
-**Por qué las colas:** la debug unit y la línea serie trabajan a ritmos muy distintos
-(un byte por la línea tarda unos 36 000 ciclos a 70 MHz). Las colas desacoplan los dos
-lados: la debug unit deja un byte en la cola de TX y sigue; los bytes que llegan esperan
-en la cola de RX hasta que la debug unit los lee.
+**Por qué las colas:** la debug unit y la línea serie trabajan a ritmos muy distintos. Las colas desacoplan los dos lados: la debug unit deja un byte en la cola de TX y sigue; los bytes que llegan esperan en la cola de RX hasta que la debug unit los lee.
 
 Diagramas: entradas a la izquierda y salidas a la derecha, con su ancho en bits. En cada salida, **R** = sale de un registro (cambia en el flanco del reloj) y **C** = combinacional (cambia apenas cambian las entradas).
 
@@ -48,8 +43,7 @@ termina un byte toma el siguiente, así que los bytes encolados salen uno detrá
 
 **Por qué 19200 baudios:** el divisor del generador de baud es entero, y con 19200 es
 grande (de 162 a 325 entre 50 y 100 MHz), así que el error de baud queda por debajo del
-0,62 % a cualquier frecuencia del sistema. Con 115200 el divisor es chico y el error
-llegaría al 3,7 %, cerca de lo que tolera una UART.
+0,62 % a cualquier frecuencia del sistema.
 
 ## `baud_rate_gen` — el ritmo de la línea
 
